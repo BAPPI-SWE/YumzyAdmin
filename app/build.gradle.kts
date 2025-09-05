@@ -31,6 +31,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        // HIGHLIGHT: Add this line to enable support for modern features
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
         jvmTarget = "11"
@@ -73,4 +75,7 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
 
     implementation("androidx.compose.material:material-icons-extended:1.6.8")
+
+    // HIGHLIGHT: Add this line to include the library that provides the modern features
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }
