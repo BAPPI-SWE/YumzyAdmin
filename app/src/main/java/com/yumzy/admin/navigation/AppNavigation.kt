@@ -13,28 +13,39 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.yumzy.admin.screens.AnalyticsScreen
-import com.yumzy.admin.screens.LiveOrdersScreen
-import com.yumzy.admin.screens.RestaurantListScreen
-import com.yumzy.admin.screens.StoreManagementScreen
+import androidx.navigation.navArgument
+import com.yumzy.admin.screens.*
 
-// A simple sealed class to define our navigation items
-sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
-    object Orders : Screen("orders", "Orders", Icons.Default.List)
-    object Restaurants : Screen("restaurants", "Restaurants", Icons.Default.Storefront)
-    object Store : Screen("store", "Store", Icons.Default.ShoppingCart)
-    object Analytics : Screen("analytics", "Analytics", Icons.Default.Analytics) // New screen added
+// Updated Screen definitions to include the new details screen with arguments
+sealed class Screen(val route: String) {
+    object Orders : Screen("orders")
+    object Restaurants : Screen("restaurants")
+    object Store : Screen("store")
+    object Analytics : Screen("analytics")
+    object RiderDetails : Screen("rider_details/{riderId}/{riderName}/{dateMillis}") {
+        fun createRoute(riderId: String, riderName: String, dateMillis: Long): String {
+            return "rider_details/$riderId/$riderName/$dateMillis"
+        }
+    }
 }
+
+// Data class to hold info for the bottom bar items
+data class BottomNavItem(val screen: Screen, val label: String, val icon: ImageVector)
 
 @Composable
 fun AppNavigation() {
     val navController = rememberNavController()
-    // Add the new screen to the list of items
-    val items = listOf(Screen.Orders, Screen.Restaurants, Screen.Store, Screen.Analytics)
+    val items = listOf(
+        BottomNavItem(Screen.Orders, "Orders", Icons.Default.List),
+        BottomNavItem(Screen.Restaurants, "Restaurants", Icons.Default.Storefront),
+        BottomNavItem(Screen.Store, "Store", Icons.Default.ShoppingCart),
+        BottomNavItem(Screen.Analytics, "Analytics", Icons.Default.Analytics)
+    )
 
     Scaffold(
         bottomBar = {
@@ -42,16 +53,14 @@ fun AppNavigation() {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentDestination = navBackStackEntry?.destination
 
-                items.forEach { screen ->
+                items.forEach { item ->
                     NavigationBarItem(
-                        icon = { Icon(screen.icon, contentDescription = screen.label) },
-                        label = { Text(screen.label) },
-                        selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
+                        icon = { Icon(item.icon, contentDescription = item.label) },
+                        label = { Text(item.label) },
+                        selected = currentDestination?.hierarchy?.any { it.route == item.screen.route } == true,
                         onClick = {
-                            navController.navigate(screen.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
+                            navController.navigate(item.screen.route) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                                 launchSingleTop = true
                                 restoreState = true
                             }
@@ -66,18 +75,27 @@ fun AppNavigation() {
             startDestination = Screen.Orders.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(Screen.Orders.route) {
-                LiveOrdersScreen()
-            }
-            composable(Screen.Restaurants.route) {
-                RestaurantListScreen()
-            }
-            composable(Screen.Store.route) {
-                StoreManagementScreen()
-            }
-            // Add the new screen destination to the NavHost
-            composable(Screen.Analytics.route) {
-                AnalyticsScreen()
+            composable(Screen.Orders.route) { LiveOrdersScreen() }
+            composable(Screen.Restaurants.route) { RestaurantListScreen() }
+            composable(Screen.Store.route) { StoreManagementScreen() }
+            composable(Screen.Analytics.route) { AnalyticsScreen(navController = navController) }
+            composable(
+                route = Screen.RiderDetails.route,
+                arguments = listOf(
+                    navArgument("riderId") { type = NavType.StringType },
+                    navArgument("riderName") { type = NavType.StringType },
+                    navArgument("dateMillis") { type = NavType.LongType }
+                )
+            ) { backStackEntry ->
+                val riderId = backStackEntry.arguments?.getString("riderId") ?: ""
+                val riderName = backStackEntry.arguments?.getString("riderName") ?: ""
+                val dateMillis = backStackEntry.arguments?.getLong("dateMillis") ?: 0L
+                RiderDetailsScreen(
+                    riderId = riderId,
+                    riderName = riderName,
+                    dateMillis = dateMillis,
+                    navController = navController
+                )
             }
         }
     }

@@ -1,5 +1,6 @@
 package com.yumzy.admin.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,9 +12,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
+import com.yumzy.admin.navigation.Screen
 import kotlinx.coroutines.tasks.await
 import java.time.Instant
 import java.time.LocalDate
@@ -35,55 +38,48 @@ data class RestaurantDailyStats(
     val totalOrders: Int
 )
 
+// THIS IS THE CORRECTED BLUEPRINT
 data class AnalyticsOrder(
     val riderId: String? = null,
     val restaurantId: String? = null,
-    val orderStatus: String? = null
+    val orderStatus: String? = null,
+    val createdAt: Timestamp = Timestamp.now() // This field was missing!
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AnalyticsScreen() {
+fun AnalyticsScreen(navController: NavController) {
     var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     var showDatePicker by remember { mutableStateOf(false) }
     var riderStats by remember { mutableStateOf<List<RiderDailyStats>>(emptyList()) }
     var restaurantStats by remember { mutableStateOf<List<RestaurantDailyStats>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
-    var selectedTabIndex by remember { mutableIntStateOf(0) } // 0 for Riders, 1 for Restaurants
+    var selectedTabIndex by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(selectedDate) {
         isLoading = true
         val db = Firebase.firestore
-
-        // Step 1: Get all riders AND all restaurants
         val ridersMap = try {
             db.collection("riders").get().await().documents.associate { doc ->
                 doc.id to (doc.getString("name") ?: "Unknown Rider")
             }
         } catch (e: Exception) { emptyMap() }
-
         val restaurantsMap = try {
             db.collection("restaurants").get().await().documents.associate { doc ->
                 doc.id to (doc.getString("name") ?: "Unknown Restaurant")
             }
         } catch (e: Exception) { emptyMap() }
-
-        // Step 2: Calculate date range
         val zoneId = ZoneId.systemDefault()
         val startOfDay = selectedDate.atStartOfDay(zoneId).toInstant().toEpochMilli()
         val endOfDay = selectedDate.plusDays(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
         val startTimestamp = Timestamp(startOfDay / 1000, 0)
         val endTimestamp = Timestamp(endOfDay / 1000, 0)
-
-        // Step 3: Fetch orders for that day
         val ordersForDay = try {
             db.collection("orders")
                 .whereGreaterThanOrEqualTo("createdAt", startTimestamp)
                 .whereLessThan("createdAt", endTimestamp)
                 .get().await().documents.mapNotNull { it.toObject(AnalyticsOrder::class.java) }
         } catch (e: Exception) { emptyList() }
-
-        // Step 4: Process Rider Stats
         val riderOrders = ordersForDay.filter { it.riderId != null }.groupBy { it.riderId!! }
         riderStats = ridersMap.map { (riderId, riderName) ->
             val orders = riderOrders[riderId] ?: emptyList()
@@ -95,8 +91,6 @@ fun AnalyticsScreen() {
                 deliveredCount = orders.count { it.orderStatus == "Delivered" }
             )
         }.sortedByDescending { it.totalAssigned }
-
-        // Step 5: Process Restaurant Stats
         val restaurantOrders = ordersForDay.filter { it.restaurantId != null }.groupBy { it.restaurantId!! }
         restaurantStats = restaurantsMap.map { (restaurantId, restaurantName) ->
             RestaurantDailyStats(
@@ -105,7 +99,6 @@ fun AnalyticsScreen() {
                 totalOrders = restaurantOrders[restaurantId]?.size ?: 0
             )
         }.sortedByDescending { it.totalOrders }
-
         isLoading = false
     }
 
@@ -128,34 +121,26 @@ fun AnalyticsScreen() {
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(horizontal = 16.dp).padding(top = 8.dp)
             )
-
-            // Tab Row for switching between Riders and Restaurants
             TabRow(selectedTabIndex = selectedTabIndex) {
-                Tab(
-                    selected = selectedTabIndex == 0,
-                    onClick = { selectedTabIndex = 0 },
-                    text = { Text("Rider Stats") }
-                )
-                Tab(
-                    selected = selectedTabIndex == 1,
-                    onClick = { selectedTabIndex = 1 },
-                    text = { Text("Restaurant Stats") }
-                )
+                Tab(selected = selectedTabIndex == 0, onClick = { selectedTabIndex = 0 }, text = { Text("Rider Stats") })
+                Tab(selected = selectedTabIndex == 1, onClick = { selectedTabIndex = 1 }, text = { Text("Restaurant Stats") })
             }
-
             Spacer(modifier = Modifier.height(16.dp))
-
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             } else {
-                // Show content based on the selected tab
                 when (selectedTabIndex) {
-                    0 -> RiderStatsContent(riderStats)
+                    0 -> RiderStatsContent(
+                        stats = riderStats,
+                        onRiderClick = { riderStat ->
+                            val dateMillis = selectedDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                            navController.navigate(Screen.RiderDetails.createRoute(riderStat.riderId, riderStat.riderName, dateMillis))
+                        }
+                    )
                     1 -> RestaurantStatsContent(restaurantStats)
                 }
             }
         }
-
         if (showDatePicker) {
             val datePickerState = rememberDatePickerState(
                 initialSelectedDateMillis = selectedDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
@@ -177,7 +162,7 @@ fun AnalyticsScreen() {
 }
 
 @Composable
-fun RiderStatsContent(stats: List<RiderDailyStats>) {
+fun RiderStatsContent(stats: List<RiderDailyStats>, onRiderClick: (RiderDailyStats) -> Unit) {
     if (stats.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No rider data for this day.") }
     } else {
@@ -186,7 +171,7 @@ fun RiderStatsContent(stats: List<RiderDailyStats>) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(stats) { riderStat ->
-                RiderStatCard(stat = riderStat)
+                RiderStatCard(stat = riderStat, onClick = { onRiderClick(riderStat) })
             }
         }
     }
@@ -209,8 +194,8 @@ fun RestaurantStatsContent(stats: List<RestaurantDailyStats>) {
 }
 
 @Composable
-fun RiderStatCard(stat: RiderDailyStats) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+fun RiderStatCard(stat: RiderDailyStats, onClick: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(stat.riderName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(12.dp))
