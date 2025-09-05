@@ -2,6 +2,7 @@ package com.yumzy.admin.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Storefront
@@ -16,6 +17,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.yumzy.admin.screens.AnalyticsScreen
 import com.yumzy.admin.screens.LiveOrdersScreen
 import com.yumzy.admin.screens.RestaurantListScreen
 import com.yumzy.admin.screens.StoreManagementScreen
@@ -24,14 +26,15 @@ import com.yumzy.admin.screens.StoreManagementScreen
 sealed class Screen(val route: String, val label: String, val icon: ImageVector) {
     object Orders : Screen("orders", "Orders", Icons.Default.List)
     object Restaurants : Screen("restaurants", "Restaurants", Icons.Default.Storefront)
-    object Store : Screen("store", "Store", Icons.Default.ShoppingCart) // New screen added
+    object Store : Screen("store", "Store", Icons.Default.ShoppingCart)
+    object Analytics : Screen("analytics", "Analytics", Icons.Default.Analytics) // New screen added
 }
 
 @Composable
 fun AppNavigation() {
     val navController = rememberNavController()
     // Add the new screen to the list of items
-    val items = listOf(Screen.Orders, Screen.Restaurants, Screen.Store)
+    val items = listOf(Screen.Orders, Screen.Restaurants, Screen.Store, Screen.Analytics)
 
     Scaffold(
         bottomBar = {
@@ -69,9 +72,12 @@ fun AppNavigation() {
             composable(Screen.Restaurants.route) {
                 RestaurantListScreen()
             }
-            // Add the new screen destination to the NavHost
             composable(Screen.Store.route) {
                 StoreManagementScreen()
+            }
+            // Add the new screen destination to the NavHost
+            composable(Screen.Analytics.route) {
+                AnalyticsScreen()
             }
         }
     }
