@@ -2,10 +2,7 @@ package com.yumzy.admin.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Analytics
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.ShoppingCart
-import androidx.compose.material.icons.filled.Storefront
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -21,10 +18,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.yumzy.admin.screens.*
 
-// Updated Screen definitions to include the new details screen with arguments
 sealed class Screen(val route: String) {
     object Orders : Screen("orders")
-    object Restaurants : Screen("restaurants")
+    object Categories : Screen("categories") // Replaced Restaurants
     object Store : Screen("store")
     object Analytics : Screen("analytics")
     object RiderDetails : Screen("rider_details/{riderId}/{riderName}/{dateMillis}") {
@@ -34,7 +30,6 @@ sealed class Screen(val route: String) {
     }
 }
 
-// Data class to hold info for the bottom bar items
 data class BottomNavItem(val screen: Screen, val label: String, val icon: ImageVector)
 
 @Composable
@@ -42,7 +37,7 @@ fun AppNavigation() {
     val navController = rememberNavController()
     val items = listOf(
         BottomNavItem(Screen.Orders, "Orders", Icons.Default.List),
-        BottomNavItem(Screen.Restaurants, "Restaurants", Icons.Default.Storefront),
+        BottomNavItem(Screen.Categories, "Categories", Icons.Default.Category), // Replaced Restaurants
         BottomNavItem(Screen.Store, "Store", Icons.Default.ShoppingCart),
         BottomNavItem(Screen.Analytics, "Analytics", Icons.Default.Analytics)
     )
@@ -52,7 +47,6 @@ fun AppNavigation() {
             NavigationBar {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentDestination = navBackStackEntry?.destination
-
                 items.forEach { item ->
                     NavigationBarItem(
                         icon = { Icon(item.icon, contentDescription = item.label) },
@@ -70,13 +64,9 @@ fun AppNavigation() {
             }
         }
     ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = Screen.Orders.route,
-            modifier = Modifier.padding(innerPadding)
-        ) {
+        NavHost(navController = navController, startDestination = Screen.Orders.route, modifier = Modifier.padding(innerPadding)) {
             composable(Screen.Orders.route) { LiveOrdersScreen() }
-            composable(Screen.Restaurants.route) { RestaurantListScreen() }
+            composable(Screen.Categories.route) { CategoryManagementScreen() } // Replaced RestaurantListScreen
             composable(Screen.Store.route) { StoreManagementScreen() }
             composable(Screen.Analytics.route) { AnalyticsScreen(navController = navController) }
             composable(
@@ -90,12 +80,7 @@ fun AppNavigation() {
                 val riderId = backStackEntry.arguments?.getString("riderId") ?: ""
                 val riderName = backStackEntry.arguments?.getString("riderName") ?: ""
                 val dateMillis = backStackEntry.arguments?.getLong("dateMillis") ?: 0L
-                RiderDetailsScreen(
-                    riderId = riderId,
-                    riderName = riderName,
-                    dateMillis = dateMillis,
-                    navController = navController
-                )
+                RiderDetailsScreen(riderId = riderId, riderName = riderName, dateMillis = dateMillis, navController = navController)
             }
         }
     }
