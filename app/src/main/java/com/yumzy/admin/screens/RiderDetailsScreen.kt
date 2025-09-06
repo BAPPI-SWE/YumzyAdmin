@@ -22,14 +22,25 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-// Blueprint for the detailed order information we need for this screen
+// --- UPDATED BLUEPRINT ---
+// Added deliveryCharge and serviceCharge to our order details
 data class RiderOrderDetail(
     val id: String = "",
     val restaurantName: String = "",
     val userName: String = "",
     val totalPrice: Double = 0.0,
+    val deliveryCharge: Double = 0.0,
+    val serviceCharge: Double = 0.0,
     val orderStatus: String = "",
     val items: List<Map<String, Any>> = emptyList()
+)
+
+// This new class will hold all our calculated totals
+data class DailyTotals(
+    val totalItems: Int = 0,
+    val totalGoodsValue: Double = 0.0,
+    val totalDeliveryCharge: Double = 0.0,
+    val totalServiceCharge: Double = 0.0
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,7 +52,7 @@ fun RiderDetailsScreen(
     navController: NavController
 ) {
     var orders by remember { mutableStateOf<List<RiderOrderDetail>>(emptyList()) }
-    var totalItems by remember { mutableStateOf(0) }
+    var dailyTotals by remember { mutableStateOf(DailyTotals()) } // State for all our totals
     var isLoading by remember { mutableStateOf(true) }
     val selectedDate = Instant.ofEpochMilli(dateMillis).atZone(ZoneId.systemDefault()).toLocalDate()
 
@@ -52,7 +63,6 @@ fun RiderDetailsScreen(
         val startTimestamp = Timestamp(startOfDay / 1000, 0)
         val endTimestamp = Timestamp(endOfDay / 1000, 0)
 
-        // This is the new, safer way to get the data
         val acceptedOrders = Firebase.firestore.collection("orders")
             .whereEqualTo("riderId", riderId)
             .whereGreaterThanOrEqualTo("createdAt", startTimestamp)
@@ -60,32 +70,41 @@ fun RiderDetailsScreen(
             .get()
             .await()
             .documents.mapNotNull { doc ->
-                // Manually and safely get each piece of data
                 val status = doc.getString("orderStatus") ?: ""
                 if (status in listOf("Pending", "Rejected", "Cancelled")) {
-                    return@mapNotNull null // Skip this order
+                    return@mapNotNull null
                 }
-
-                // The 'items' field is a list, so we get it as a list.
-                // We provide an empty list '?: emptyList()' in case it's missing.
                 val itemsList = doc.get("items") as? List<Map<String, Any>> ?: emptyList()
-
                 RiderOrderDetail(
                     id = doc.id,
-                    restaurantName = doc.getString("restaurantName") ?: "Unknown Restaurant",
-                    userName = doc.getString("userName") ?: "Unknown User",
+                    restaurantName = doc.getString("restaurantName") ?: "N/A",
+                    userName = doc.getString("userName") ?: "N/A",
                     totalPrice = doc.getDouble("totalPrice") ?: 0.0,
+                    deliveryCharge = doc.getDouble("deliveryCharge") ?: 0.0,
+                    serviceCharge = doc.getDouble("serviceCharge") ?: 0.0,
                     orderStatus = status,
                     items = itemsList
                 )
             }
 
         orders = acceptedOrders
-        totalItems = acceptedOrders.sumOf { order ->
-            order.items.sumOf { item ->
-                (item["quantity"] as? Long)?.toInt() ?: 0
-            }
+
+        // --- NEW CALCULATION LOGIC ---
+        val itemsCount = acceptedOrders.sumOf { order ->
+            order.items.sumOf { item -> (item["quantity"] as? Long)?.toInt() ?: 0 }
         }
+        val deliveryChargeSum = acceptedOrders.sumOf { it.deliveryCharge }
+        val serviceChargeSum = acceptedOrders.sumOf { it.serviceCharge }
+        // Goods value is the total price minus the charges
+        val goodsValueSum = acceptedOrders.sumOf { it.totalPrice - it.deliveryCharge - it.serviceCharge }
+
+        dailyTotals = DailyTotals(
+            totalItems = itemsCount,
+            totalGoodsValue = goodsValueSum,
+            totalDeliveryCharge = deliveryChargeSum,
+            totalServiceCharge = serviceChargeSum
+        )
+
         isLoading = false
     }
 
@@ -113,32 +132,60 @@ fun RiderDetailsScreen(
                     val formatter = DateTimeFormatter.ofPattern("dd MMMM, yyyy")
                     Text("Accepted Orders on ${selectedDate.format(formatter)}", style = MaterialTheme.typography.titleLarge)
                     Spacer(modifier = Modifier.height(8.dp))
-                    SummaryCard(totalItems = totalItems)
+                    // Pass all the new totals to the redesigned summary card
+                    SummaryCard(totals = dailyTotals)
                     Spacer(modifier = Modifier.height(16.dp))
+                    if(orders.isNotEmpty()){
+                        Text("Order List", style = MaterialTheme.typography.titleMedium)
+                    }
                 }
-                items(orders) { order ->
-                    OrderDetailCard(order = order)
+                if (orders.isEmpty()){
+                    item {
+                        Box(modifier = Modifier.fillMaxWidth().padding(top = 32.dp), contentAlignment = Alignment.Center){
+                            Text("No orders found for this rider on this day.")
+                        }
+                    }
+                } else {
+                    items(orders) { order ->
+                        OrderDetailCard(order = order)
+                    }
                 }
             }
         }
     }
 }
 
+// --- REDESIGNED SUMMARY CARD ---
 @Composable
-fun SummaryCard(totalItems: Int) {
+fun SummaryCard(totals: DailyTotals) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Total Items Handled:", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            Text("$totalItems", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SummaryRow("Total Items Handled", "${totals.totalItems}")
+            Divider()
+            SummaryRow("Total Goods Value", "৳${"%.2f".format(totals.totalGoodsValue)}")
+            Divider()
+            SummaryRow("Total Delivery Charge", "৳${"%.2f".format(totals.totalDeliveryCharge)}")
+            Divider()
+            SummaryRow("Total Service Charge", "৳${"%.2f".format(totals.totalServiceCharge)}")
         }
     }
 }
+
+@Composable
+fun SummaryRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+    }
+}
+
 
 @Composable
 fun OrderDetailCard(order: RiderOrderDetail) {
@@ -152,7 +199,7 @@ fun OrderDetailCard(order: RiderOrderDetail) {
             Text("To: ${order.userName}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Divider(modifier = Modifier.padding(vertical = 8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Total: ৳${order.totalPrice}", fontWeight = FontWeight.Bold)
+                Text("Total: ৳${"%.2f".format(order.totalPrice)}", fontWeight = FontWeight.Bold)
                 Text(order.orderStatus, fontWeight = FontWeight.Bold, color = statusColor)
             }
         }
