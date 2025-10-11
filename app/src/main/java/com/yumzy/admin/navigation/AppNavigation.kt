@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.navigation.NavController
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
@@ -17,15 +18,31 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.yumzy.admin.screens.*
+import java.net.URLDecoder
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 sealed class Screen(val route: String) {
     object Orders : Screen("orders")
-    object Categories : Screen("categories") // Replaced Restaurants
+    object Categories : Screen("categories")
     object Store : Screen("store")
     object Analytics : Screen("analytics")
     object RiderDetails : Screen("rider_details/{riderId}/{riderName}/{dateMillis}") {
         fun createRoute(riderId: String, riderName: String, dateMillis: Long): String {
             return "rider_details/$riderId/$riderName/$dateMillis"
+        }
+    }
+    // --- NEW SCREENS ---
+    object MiniResSubCategories : Screen("mini_res_sub_categories/{miniResId}/{miniResName}/{parentCatId}") {
+        fun createRoute(miniResId: String, miniResName: String, parentCatId: String): String {
+            val encodedName = URLEncoder.encode(miniResName, StandardCharsets.UTF_8.toString())
+            return "mini_res_sub_categories/$miniResId/$encodedName/$parentCatId"
+        }
+    }
+    object MiniResItems : Screen("mini_res_items/{miniResId}/{subCategoryName}") {
+        fun createRoute(miniResId: String, subCategoryName: String): String {
+            val encodedSubCatName = URLEncoder.encode(subCategoryName, StandardCharsets.UTF_8.toString())
+            return "mini_res_items/$miniResId/$encodedSubCatName"
         }
     }
 }
@@ -37,7 +54,7 @@ fun AppNavigation() {
     val navController = rememberNavController()
     val items = listOf(
         BottomNavItem(Screen.Orders, "Orders", Icons.Default.List),
-        BottomNavItem(Screen.Categories, "Categories", Icons.Default.Category), // Replaced Restaurants
+        BottomNavItem(Screen.Categories, "Categories", Icons.Default.Category),
         BottomNavItem(Screen.Store, "Store", Icons.Default.ShoppingCart),
         BottomNavItem(Screen.Analytics, "Analytics", Icons.Default.Analytics)
     )
@@ -66,8 +83,8 @@ fun AppNavigation() {
     ) { innerPadding ->
         NavHost(navController = navController, startDestination = Screen.Orders.route, modifier = Modifier.padding(innerPadding)) {
             composable(Screen.Orders.route) { LiveOrdersScreen() }
-            composable(Screen.Categories.route) { CategoryManagementScreen() } // Replaced RestaurantListScreen
-            composable(Screen.Store.route) { StoreManagementScreen() }
+            composable(Screen.Categories.route) { CategoryManagementScreen() }
+            composable(Screen.Store.route) { StoreManagementScreen(navController = navController) } // Pass NavController
             composable(Screen.Analytics.route) { AnalyticsScreen(navController = navController) }
             composable(
                 route = Screen.RiderDetails.route,
@@ -81,6 +98,44 @@ fun AppNavigation() {
                 val riderName = backStackEntry.arguments?.getString("riderName") ?: ""
                 val dateMillis = backStackEntry.arguments?.getLong("dateMillis") ?: 0L
                 RiderDetailsScreen(riderId = riderId, riderName = riderName, dateMillis = dateMillis, navController = navController)
+            }
+
+            // --- NEW COMPOSABLE ROUTES ---
+            composable(
+                route = Screen.MiniResSubCategories.route,
+                arguments = listOf(
+                    navArgument("miniResId") { type = NavType.StringType },
+                    navArgument("miniResName") { type = NavType.StringType },
+                    navArgument("parentCatId") { type = NavType.StringType }
+                )
+            ) { backStackEntry ->
+                val miniResId = backStackEntry.arguments?.getString("miniResId") ?: ""
+                val encodedName = backStackEntry.arguments?.getString("miniResName") ?: ""
+                val miniResName = URLDecoder.decode(encodedName, StandardCharsets.UTF_8.toString())
+                val parentCatId = backStackEntry.arguments?.getString("parentCatId") ?: ""
+                MiniRestaurantSubCategoryScreen(
+                    miniResId = miniResId,
+                    miniResName = miniResName,
+                    parentCategoryId = parentCatId,
+                    navController = navController
+                )
+            }
+
+            composable(
+                route = Screen.MiniResItems.route,
+                arguments = listOf(
+                    navArgument("miniResId") { type = NavType.StringType },
+                    navArgument("subCategoryName") { type = NavType.StringType }
+                )
+            ) { backStackEntry ->
+                val miniResId = backStackEntry.arguments?.getString("miniResId") ?: ""
+                val encodedSubCatName = backStackEntry.arguments?.getString("subCategoryName") ?: ""
+                val subCategoryName = URLDecoder.decode(encodedSubCatName, StandardCharsets.UTF_8.toString())
+                MiniRestaurantItemListScreen(
+                    miniResId = miniResId,
+                    subCategoryName = subCategoryName,
+                    navController = navController
+                )
             }
         }
     }
