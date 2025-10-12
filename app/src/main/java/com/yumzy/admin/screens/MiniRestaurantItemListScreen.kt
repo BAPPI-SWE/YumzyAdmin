@@ -198,6 +198,42 @@ fun AddEditStoreItemDialog(
     var imageUrl by remember { mutableStateOf(item?.imageUrl ?: "") }
     var deliveryCharge by remember { mutableStateOf(item?.additionalDeliveryCharge?.toString() ?: "0") }
     var serviceCharge by remember { mutableStateOf(item?.additionalServiceCharge?.toString() ?: "0") }
+
+    // Multi-variant fields
+    var hasMultiVariant by remember { mutableStateOf(false) }
+    var variantCount by remember { mutableStateOf("2") }
+    var variantNames by remember { mutableStateOf(listOf("", "")) }
+    var variantPrices by remember { mutableStateOf(listOf("", "")) }
+
+    // Load existing multi-variant data if editing
+    LaunchedEffect(item) {
+        if (item != null) {
+            // Try to fetch multi-variant data from Firestore
+            try {
+                val doc = Firebase.firestore.collection("store_items").document(item.id).get().await()
+                val multiVariantValue = doc.getLong("multiVariant")?.toInt() ?: 0
+
+                if (multiVariantValue >= 2) {
+                    hasMultiVariant = true
+                    variantCount = multiVariantValue.toString()
+
+                    val names = mutableListOf<String>()
+                    val prices = mutableListOf<String>()
+
+                    for (i in 1..multiVariantValue) {
+                        names.add(doc.getString("variant${i}name") ?: "")
+                        prices.add(doc.getDouble("variant${i}price")?.toString() ?: "")
+                    }
+
+                    variantNames = names
+                    variantPrices = prices
+                }
+            } catch (e: Exception) {
+                // Ignore errors
+            }
+        }
+    }
+
     val context = LocalContext.current
 
     Dialog(onDismissRequest = onDismiss) {
@@ -205,17 +241,126 @@ fun AddEditStoreItemDialog(
             Column(
                 modifier = Modifier
                     .padding(16.dp)
+                    .heightIn(max = 600.dp)
                     .verticalScroll(rememberScrollState())
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(if (item == null) "Add Item" else "Edit Item", style = MaterialTheme.typography.titleLarge)
+
                     TextField(value = name, onValueChange = { name = it }, label = { Text("Item Name") })
-                    TextField(
-                        value = price,
-                        onValueChange = { price = it },
-                        label = { Text("Price (৳)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                    )
+
+                    // Multi-Variant Checkbox
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = hasMultiVariant,
+                            onCheckedChange = {
+                                hasMultiVariant = it
+                                if (it && variantCount.toIntOrNull() ?: 0 < 2) {
+                                    variantCount = "2"
+                                    variantNames = listOf("", "")
+                                    variantPrices = listOf("", "")
+                                }
+                            }
+                        )
+                        Text("Multi-Variant")
+                    }
+
+                    if (hasMultiVariant) {
+                        // Variant Count Input
+                        TextField(
+                            value = variantCount,
+                            onValueChange = {
+                                val count = it.toIntOrNull() ?: 2
+                                if (count >= 2 && count <= 10) {
+                                    variantCount = it
+
+                                    // Adjust lists
+                                    val currentNames = variantNames.toMutableList()
+                                    val currentPrices = variantPrices.toMutableList()
+
+                                    while (currentNames.size < count) {
+                                        currentNames.add("")
+                                        currentPrices.add("")
+                                    }
+                                    while (currentNames.size > count) {
+                                        currentNames.removeAt(currentNames.lastIndex)
+                                        currentPrices.removeAt(currentPrices.lastIndex)
+                                    }
+
+                                    variantNames = currentNames
+                                    variantPrices = currentPrices
+                                }
+                            },
+                            label = { Text("Number of Variants (2-10)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+
+                        Text(
+                            "Variant Details",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+
+                        // Variant inputs
+                        val count = variantCount.toIntOrNull() ?: 2
+                        for (i in 0 until count.coerceAtMost(variantNames.size)) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        "Variant ${i + 1}",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    TextField(
+                                        value = variantNames.getOrElse(i) { "" },
+                                        onValueChange = { newValue ->
+                                            val updated = variantNames.toMutableList()
+                                            if (i < updated.size) {
+                                                updated[i] = newValue
+                                            }
+                                            variantNames = updated
+                                        },
+                                        label = { Text("Variant Name") },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    TextField(
+                                        value = variantPrices.getOrElse(i) { "" },
+                                        onValueChange = { newValue ->
+                                            val updated = variantPrices.toMutableList()
+                                            if (i < updated.size) {
+                                                updated[i] = newValue
+                                            }
+                                            variantPrices = updated
+                                        },
+                                        label = { Text("Price (৳)") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // Regular price field (only shown if not multi-variant)
+                        TextField(
+                            value = price,
+                            onValueChange = { price = it },
+                            label = { Text("Price (৳)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                    }
+
                     TextField(value = description, onValueChange = { description = it }, label = { Text("Description (Optional)") }, maxLines = 3)
                     TextField(value = imageUrl, onValueChange = { imageUrl = it }, label = { Text("Image URL (Optional)") })
                     TextField(
@@ -234,19 +379,16 @@ fun AddEditStoreItemDialog(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         TextButton(onClick = onDismiss) { Text("Cancel") }
                         Button(onClick = {
-                            val priceDouble = price.toDoubleOrNull()
                             val deliveryDouble = deliveryCharge.toDoubleOrNull() ?: 0.0
                             val serviceDouble = serviceCharge.toDoubleOrNull() ?: 0.0
 
-                            // Only check if name is blank or price is invalid.
-                            if (name.isBlank() || priceDouble == null) {
-                                Toast.makeText(context, "Name and Price are required.", Toast.LENGTH_SHORT).show()
+                            if (name.isBlank()) {
+                                Toast.makeText(context, "Item name is required.", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
 
                             val newItemData = hashMapOf<String, Any>(
                                 "name" to name,
-                                "price" to priceDouble,
                                 "itemDescription" to description,
                                 "imageUrl" to imageUrl,
                                 "additionalDeliveryCharge" to deliveryDouble,
@@ -255,6 +397,46 @@ fun AddEditStoreItemDialog(
                                 "subCategory" to fixedSubCategory,
                                 "stock" to (item?.stock ?: "yes")
                             )
+
+                            if (hasMultiVariant) {
+                                val count = variantCount.toIntOrNull() ?: 2
+                                if (count < 2) {
+                                    Toast.makeText(context, "Multi-variant must have at least 2 variants.", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+
+                                // Validate all variants have name and price
+                                for (i in 0 until count) {
+                                    if (variantNames.getOrNull(i).isNullOrBlank() || variantPrices.getOrNull(i).isNullOrBlank()) {
+                                        Toast.makeText(context, "All variants must have name and price.", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                }
+
+                                newItemData["multiVariant"] = count
+                                newItemData["price"] = 0.0 // Placeholder, not used for multi-variant
+
+                                // Add variant fields
+                                for (i in 0 until count) {
+                                    val variantPrice = variantPrices[i].toDoubleOrNull()
+                                    if (variantPrice == null) {
+                                        Toast.makeText(context, "Invalid price for variant ${i + 1}.", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    newItemData["variant${i + 1}name"] = variantNames[i]
+                                    newItemData["variant${i + 1}price"] = variantPrice
+                                }
+                            } else {
+                                // Regular item
+                                val priceDouble = price.toDoubleOrNull()
+                                if (priceDouble == null) {
+                                    Toast.makeText(context, "Valid price is required.", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                newItemData["price"] = priceDouble
+                                newItemData["multiVariant"] = 0
+                            }
+
                             onSave(newItemData)
                         }) { Text("Save") }
                     }
