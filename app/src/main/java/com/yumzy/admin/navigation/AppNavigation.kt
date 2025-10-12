@@ -24,7 +24,7 @@ import java.nio.charset.StandardCharsets
 
 sealed class Screen(val route: String) {
     object Orders : Screen("orders")
-    object Categories : Screen("categories")
+    object MiniRestaurants : Screen("mini_restaurants")
     object Store : Screen("store")
     object Analytics : Screen("analytics")
     object RiderDetails : Screen("rider_details/{riderId}/{riderName}/{dateMillis}") {
@@ -32,7 +32,14 @@ sealed class Screen(val route: String) {
             return "rider_details/$riderId/$riderName/$dateMillis"
         }
     }
-    // --- NEW SCREENS ---
+    // --- RESTAURANT ANALYTICS SCREEN ---
+    object RestaurantAnalytics : Screen("restaurant_analytics/{miniResId}/{miniResName}") {
+        fun createRoute(miniResId: String, miniResName: String): String {
+            val encodedName = URLEncoder.encode(miniResName, StandardCharsets.UTF_8.toString())
+            return "restaurant_analytics/$miniResId/$encodedName"
+        }
+    }
+    // --- SUB-CATEGORY AND ITEMS SCREENS ---
     object MiniResSubCategories : Screen("mini_res_sub_categories/{miniResId}/{miniResName}/{parentCatId}") {
         fun createRoute(miniResId: String, miniResName: String, parentCatId: String): String {
             val encodedName = URLEncoder.encode(miniResName, StandardCharsets.UTF_8.toString())
@@ -54,7 +61,7 @@ fun AppNavigation() {
     val navController = rememberNavController()
     val items = listOf(
         BottomNavItem(Screen.Orders, "Orders", Icons.Default.List),
-        BottomNavItem(Screen.Categories, "Categories", Icons.Default.Category),
+        BottomNavItem(Screen.MiniRestaurants, "Restaurants", Icons.Default.Restaurant),
         BottomNavItem(Screen.Store, "Store", Icons.Default.ShoppingCart),
         BottomNavItem(Screen.Analytics, "Analytics", Icons.Default.Analytics)
     )
@@ -83,9 +90,10 @@ fun AppNavigation() {
     ) { innerPadding ->
         NavHost(navController = navController, startDestination = Screen.Orders.route, modifier = Modifier.padding(innerPadding)) {
             composable(Screen.Orders.route) { LiveOrdersScreen() }
-            composable(Screen.Categories.route) { CategoryManagementScreen() }
-            composable(Screen.Store.route) { StoreManagementScreen(navController = navController) } // Pass NavController
+            composable(Screen.MiniRestaurants.route) { CategoryManagementScreen(navController = navController) }
+            composable(Screen.Store.route) { StoreManagementScreen(navController = navController) }
             composable(Screen.Analytics.route) { AnalyticsScreen(navController = navController) }
+
             composable(
                 route = Screen.RiderDetails.route,
                 arguments = listOf(
@@ -100,7 +108,25 @@ fun AppNavigation() {
                 RiderDetailsScreen(riderId = riderId, riderName = riderName, dateMillis = dateMillis, navController = navController)
             }
 
-            // --- NEW COMPOSABLE ROUTES ---
+            // --- RESTAURANT ANALYTICS SCREEN ---
+            composable(
+                route = Screen.RestaurantAnalytics.route,
+                arguments = listOf(
+                    navArgument("miniResId") { type = NavType.StringType },
+                    navArgument("miniResName") { type = NavType.StringType }
+                )
+            ) { backStackEntry ->
+                val miniResId = backStackEntry.arguments?.getString("miniResId") ?: ""
+                val encodedName = backStackEntry.arguments?.getString("miniResName") ?: ""
+                val miniResName = URLDecoder.decode(encodedName, StandardCharsets.UTF_8.toString())
+                RestaurantAnalyticsScreen(
+                    miniResId = miniResId,
+                    miniResName = miniResName,
+                    navController = navController
+                )
+            }
+
+            // --- SUB-CATEGORY SCREEN ---
             composable(
                 route = Screen.MiniResSubCategories.route,
                 arguments = listOf(
@@ -121,6 +147,7 @@ fun AppNavigation() {
                 )
             }
 
+            // --- ITEMS SCREEN ---
             composable(
                 route = Screen.MiniResItems.route,
                 arguments = listOf(

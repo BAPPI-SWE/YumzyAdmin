@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -36,6 +37,9 @@ import com.yumzy.admin.navigation.Screen
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
+// Data class for locations
+data class LocationData(val subLocations: List<String> = emptyList())
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StoreManagementScreen(navController: NavController) {
@@ -52,6 +56,10 @@ fun StoreManagementScreen(navController: NavController) {
 
     var showAddEditDialog by remember { mutableStateOf(false) }
     var restaurantToEdit by remember { mutableStateOf<MiniRestaurant?>(null) }
+
+    // For category management
+    var showAddCategoryDialog by remember { mutableStateOf(false) }
+    var categoryToEdit by remember { mutableStateOf<StoreSubCategory?>(null) }
 
 
     fun refreshData() {
@@ -88,12 +96,22 @@ fun StoreManagementScreen(navController: NavController) {
     Scaffold(
         topBar = { TopAppBar(title = { Text("Yumzy Store Management") }) },
         floatingActionButton = {
-            if (selectedTabIndex == 1) { // Show FAB only on "Shops" tab
-                FloatingActionButton(onClick = {
-                    restaurantToEdit = null // Ensure we are adding, not editing
-                    showAddEditDialog = true
-                }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add Mini-Restaurant")
+            when (selectedTabIndex) {
+                0 -> { // Categories tab
+                    FloatingActionButton(onClick = {
+                        categoryToEdit = null
+                        showAddCategoryDialog = true
+                    }) {
+                        Icon(Icons.Default.Add, contentDescription = "Add Sub-Category")
+                    }
+                }
+                1 -> { // Shops tab
+                    FloatingActionButton(onClick = {
+                        restaurantToEdit = null
+                        showAddEditDialog = true
+                    }) {
+                        Icon(Icons.Default.Add, contentDescription = "Add Mini-Restaurant")
+                    }
                 }
             }
         }
@@ -112,7 +130,10 @@ fun StoreManagementScreen(navController: NavController) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             } else {
                 when (selectedTabIndex) {
-                    0 -> CategoriesContent(groupedCategories)
+                    0 -> CategoriesManagementContent(
+                        groupedCategories = groupedCategories,
+                        onCategoryClick = { categoryToEdit = it }
+                    )
                     1 -> ShopsContent(
                         miniRestaurants = miniRestaurants,
                         onCardClick = { miniRes ->
@@ -133,6 +154,7 @@ fun StoreManagementScreen(navController: NavController) {
             }
         }
 
+        // Shop Add/Edit Dialog
         if (showAddEditDialog) {
             AddEditMiniRestaurantDialog(
                 restaurant = restaurantToEdit,
@@ -162,11 +184,70 @@ fun StoreManagementScreen(navController: NavController) {
                 }
             )
         }
+
+        // Category Add/Edit Dialog
+        if (showAddCategoryDialog) {
+            EditCategoryDialog(
+                mainCategories = mainCategories,
+                allLocations = allSubLocations,
+                onDismiss = { showAddCategoryDialog = false },
+                onSave = { name, imageUrl, parentId, locations ->
+                    val newCategory = hashMapOf(
+                        "name" to name,
+                        "imageUrl" to imageUrl,
+                        "parentCategory" to parentId,
+                        "availableLocations" to locations
+                    )
+                    Firebase.firestore.collection("store_sub_categories").add(newCategory)
+                        .addOnSuccessListener {
+                            Toast.makeText(context, "Category Added", Toast.LENGTH_SHORT).show()
+                            refreshData()
+                        }
+                    showAddCategoryDialog = false
+                }
+            )
+        }
+
+        categoryToEdit?.let { category ->
+            EditCategoryDialog(
+                mainCategories = mainCategories,
+                allLocations = allSubLocations,
+                subCategory = category,
+                onDismiss = { categoryToEdit = null },
+                onSave = { name, imageUrl, parentId, locations ->
+                    val updatedCategory = mapOf(
+                        "name" to name,
+                        "imageUrl" to imageUrl,
+                        "parentCategory" to parentId,
+                        "availableLocations" to locations
+                    )
+                    Firebase.firestore.collection("store_sub_categories").document(category.id)
+                        .update(updatedCategory)
+                        .addOnSuccessListener {
+                            Toast.makeText(context, "Category Updated", Toast.LENGTH_SHORT).show()
+                            refreshData()
+                        }
+                    categoryToEdit = null
+                },
+                onDelete = {
+                    Firebase.firestore.collection("store_sub_categories").document(category.id)
+                        .delete()
+                        .addOnSuccessListener {
+                            Toast.makeText(context, "Category Deleted", Toast.LENGTH_SHORT).show()
+                            refreshData()
+                        }
+                    categoryToEdit = null
+                }
+            )
+        }
     }
 }
 
 @Composable
-fun CategoriesContent(groupedCategories: List<GroupedCategory>) {
+fun CategoriesManagementContent(
+    groupedCategories: List<GroupedCategory>,
+    onCategoryClick: (StoreSubCategory) -> Unit
+) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -180,12 +261,29 @@ fun CategoriesContent(groupedCategories: List<GroupedCategory>) {
                 modifier = Modifier.padding(bottom = 8.dp)
             )
             group.subCategories.forEach { subCat ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = subCat.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(16.dp)
-                    )
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onCategoryClick(subCat) }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = subCat.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "${subCat.availableLocations.size} locations",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
             }
@@ -345,11 +443,88 @@ fun AddEditMiniRestaurantDialog(
                     Button(onClick = {
                         val parent = selectedParent
                         if (name.isBlank() || imageUrl.isBlank() || parent == null || selectedLocations.isEmpty()) {
-                        //    Toast.makeText(LocalContext.current, "All fields are required.", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
                         onSave(name, imageUrl, parent.id, selectedLocations, isOpen)
                     }) { Text("Save") }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditCategoryDialog(
+    mainCategories: List<MainCategory>,
+    allLocations: List<String>,
+    subCategory: StoreSubCategory? = null,
+    onDismiss: () -> Unit,
+    onSave: (name: String, imageUrl: String, parentId: String, locations: List<String>) -> Unit,
+    onDelete: (() -> Unit)? = null
+) {
+    var name by remember { mutableStateOf(subCategory?.name ?: "") }
+    var imageUrl by remember { mutableStateOf(subCategory?.imageUrl ?: "") }
+    var expanded by remember { mutableStateOf(false) }
+    var selectedParent by remember { mutableStateOf(mainCategories.find { it.id == subCategory?.parentCategory }) }
+    var selectedLocations by remember { mutableStateOf(subCategory?.availableLocations ?: emptyList()) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(if (subCategory == null) "Add Sub-Category" else "Edit Sub-Category", style = MaterialTheme.typography.titleLarge)
+                TextField(value = name, onValueChange = { name = it }, label = { Text("Sub-Category Name") })
+                TextField(value = imageUrl, onValueChange = { imageUrl = it }, label = { Text("Image URL") })
+
+                ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+                    TextField(
+                        value = selectedParent?.name ?: "Select Main Category",
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier.menuAnchor()
+                    )
+                    ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        mainCategories.forEach { mainCat ->
+                            DropdownMenuItem(text = { Text(mainCat.name) }, onClick = { selectedParent = mainCat; expanded = false })
+                        }
+                    }
+                }
+
+                MultiSelectDropdown(
+                    label = "Available Locations",
+                    options = allLocations,
+                    selectedOptions = selectedLocations,
+                    onSelectionChanged = { selectedLocations = it }
+                )
+
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    if (onDelete != null) {
+                        var showDeleteConfirm by remember { mutableStateOf(false) }
+                        IconButton(onClick = { showDeleteConfirm = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
+                        }
+                        if(showDeleteConfirm){
+                            AlertDialog(
+                                onDismissRequest = { showDeleteConfirm = false },
+                                title = { Text("Delete Category?") },
+                                text = { Text("Are you sure you want to delete '${subCategory?.name}'? This cannot be undone.")},
+                                confirmButton = { Button(onClick = { onDelete(); showDeleteConfirm = false }) { Text("Delete") } },
+                                dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }}
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Button(onClick = {
+                        val currentParent = selectedParent
+                        if(name.isBlank() || imageUrl.isBlank() || currentParent == null || selectedLocations.isEmpty()){
+                            return@Button
+                        }
+                        onSave(name, imageUrl, currentParent.id, selectedLocations)
+                    }) {
+                        Text("Save")
+                    }
                 }
             }
         }
