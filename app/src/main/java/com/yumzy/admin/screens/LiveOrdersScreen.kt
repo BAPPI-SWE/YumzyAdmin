@@ -6,9 +6,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -63,6 +66,10 @@ fun LiveOrdersScreen() {
     // Date range filter
     var startDate by remember { mutableStateOf<LocalDate?>(null) }
     var endDate by remember { mutableStateOf<LocalDate?>(null) }
+
+    // Time range filter
+    var startTime by remember { mutableStateOf<Pair<Int, Int>?>(null) } // Hour, Minute
+    var endTime by remember { mutableStateOf<Pair<Int, Int>?>(null) } // Hour, Minute
 
     // Available filter options
     val allStatuses = listOf("Pending", "Accepted", "Preparing", "On the way", "Delivered", "Rejected", "Cancelled")
@@ -123,7 +130,7 @@ fun LiveOrdersScreen() {
     }
 
     // Apply filters
-    val filteredOrders = remember(allOrders, selectedStatuses, selectedSubLocations, searchQuery, startDate, endDate) {
+    val filteredOrders = remember(allOrders, selectedStatuses, selectedSubLocations, searchQuery, startDate, endDate, startTime, endTime) {
         allOrders.filter { order ->
             // Status filter
             val statusMatch = selectedStatuses.isEmpty() || selectedStatuses.contains(order.orderStatus)
@@ -141,26 +148,45 @@ fun LiveOrdersScreen() {
                         || order.userName.contains(searchQuery, ignoreCase = true)
             }
 
-            // Date range filter
-            val dateMatch = if (startDate == null && endDate == null) {
+            // Date range filter with time
+            val dateTimeMatch = if (startDate == null && endDate == null && startTime == null && endTime == null) {
                 true
             } else {
-                val orderDate = Instant.ofEpochMilli(order.createdAt.toDate().time)
+                val orderDateTime = order.createdAt.toDate()
+                val calendar = Calendar.getInstance().apply { time = orderDateTime }
+
+                val orderDate = Instant.ofEpochMilli(orderDateTime.time)
                     .atZone(ZoneId.systemDefault())
                     .toLocalDate()
 
+                val orderHour = calendar.get(Calendar.HOUR_OF_DAY)
+                val orderMinute = calendar.get(Calendar.MINUTE)
+
+                // Date filter
                 val afterStart = startDate?.let { orderDate.isAfter(it.minusDays(1)) } ?: true
                 val beforeEnd = endDate?.let { orderDate.isBefore(it.plusDays(1)) } ?: true
 
-                afterStart && beforeEnd
+                // Time filter (only if on the same date or no date filter)
+                val timeMatch = if (startTime != null || endTime != null) {
+                    val orderTimeInMinutes = orderHour * 60 + orderMinute
+                    val startTimeInMinutes = startTime?.let { it.first * 60 + it.second } ?: 0
+                    val endTimeInMinutes = endTime?.let { it.first * 60 + it.second } ?: (23 * 60 + 59)
+
+                    orderTimeInMinutes >= startTimeInMinutes && orderTimeInMinutes <= endTimeInMinutes
+                } else {
+                    true
+                }
+
+                afterStart && beforeEnd && timeMatch
             }
 
-            statusMatch && locationMatch && searchMatch && dateMatch
+            statusMatch && locationMatch && searchMatch && dateTimeMatch
         }
     }
 
     val activeFilterCount = selectedStatuses.size + selectedSubLocations.size +
-            (if (startDate != null || endDate != null) 1 else 0)
+            (if (startDate != null || endDate != null) 1 else 0) +
+            (if (startTime != null || endTime != null) 1 else 0)
 
     Scaffold(
         topBar = {
@@ -296,6 +322,42 @@ fun LiveOrdersScreen() {
                 }
             }
 
+            // Time range display
+            if (startTime != null || endTime != null) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Time: ${startTime?.let { "${it.first}:${it.second.toString().padStart(2, '0')}" } ?: "Start"} to ${endTime?.let { "${it.first}:${it.second.toString().padStart(2, '0')}" } ?: "End"}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        IconButton(
+                            onClick = {
+                                startTime = null
+                                endTime = null
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Clear times",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
             // Clear all filters button
             if (activeFilterCount > 0 || searchQuery.isNotEmpty()) {
                 TextButton(
@@ -305,6 +367,8 @@ fun LiveOrdersScreen() {
                         searchQuery = ""
                         startDate = null
                         endDate = null
+                        startTime = null
+                        endTime = null
                     },
                     modifier = Modifier.padding(horizontal = 16.dp)
                 ) {
@@ -366,11 +430,15 @@ fun LiveOrdersScreen() {
 
     // Date filter dialog
     if (showDateFilter) {
-        DateRangeFilterDialog(
+        DateTimeRangeFilterDialog(
             startDate = startDate,
             endDate = endDate,
+            startTime = startTime,
+            endTime = endTime,
             onStartDateSelected = { startDate = it },
             onEndDateSelected = { endDate = it },
+            onStartTimeSelected = { startTime = it },
+            onEndTimeSelected = { endTime = it },
             onDismiss = { showDateFilter = false }
         )
     }
@@ -656,29 +724,48 @@ fun FilterDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DateRangeFilterDialog(
+fun DateTimeRangeFilterDialog(
     startDate: LocalDate?,
     endDate: LocalDate?,
+    startTime: Pair<Int, Int>?,
+    endTime: Pair<Int, Int>?,
     onStartDateSelected: (LocalDate?) -> Unit,
     onEndDateSelected: (LocalDate?) -> Unit,
+    onStartTimeSelected: (Pair<Int, Int>?) -> Unit,
+    onEndTimeSelected: (Pair<Int, Int>?) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var showStartPicker by remember { mutableStateOf(false) }
-    var showEndPicker by remember { mutableStateOf(false) }
+    var showStartDatePicker by remember { mutableStateOf(false) }
+    var showEndDatePicker by remember { mutableStateOf(false) }
+    var showStartTimePicker by remember { mutableStateOf(false) }
+    var showEndTimePicker by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Card(shape = RoundedCornerShape(16.dp)) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Text(
-                    "Date Range Filter",
+                    "Date & Time Filter",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
 
                 Spacer(Modifier.height(16.dp))
 
+                // Date Range Section
+                Text(
+                    "Date Range",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(Modifier.height(8.dp))
+
                 OutlinedButton(
-                    onClick = { showStartPicker = true },
+                    onClick = { showStartDatePicker = true },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.DateRange, contentDescription = null)
@@ -689,12 +776,51 @@ fun DateRangeFilterDialog(
                 Spacer(Modifier.height(8.dp))
 
                 OutlinedButton(
-                    onClick = { showEndPicker = true },
+                    onClick = { showEndDatePicker = true },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.DateRange, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text(endDate?.toString() ?: "Select End Date")
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Divider()
+                Spacer(Modifier.height(16.dp))
+
+                // Time Range Section
+                Text(
+                    "Time Range",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = { showStartTimePicker = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.AccessTime, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        startTime?.let { "${it.first}:${it.second.toString().padStart(2, '0')}" }
+                            ?: "Select Start Time"
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                OutlinedButton(
+                    onClick = { showEndTimePicker = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.AccessTime, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        endTime?.let { "${it.first}:${it.second.toString().padStart(2, '0')}" }
+                            ?: "Select End Time"
+                    )
                 }
 
                 Spacer(Modifier.height(16.dp))
@@ -706,8 +832,10 @@ fun DateRangeFilterDialog(
                     TextButton(onClick = {
                         onStartDateSelected(null)
                         onEndDateSelected(null)
+                        onStartTimeSelected(null)
+                        onEndTimeSelected(null)
                     }) {
-                        Text("Clear")
+                        Text("Clear All")
                     }
 
                     Row {
@@ -723,12 +851,13 @@ fun DateRangeFilterDialog(
         }
     }
 
-    if (showStartPicker) {
+    // Date Pickers
+    if (showStartDatePicker) {
         val datePickerState = rememberDatePickerState(
             initialSelectedDateMillis = startDate?.atStartOfDay(ZoneId.systemDefault())?.toInstant()?.toEpochMilli()
         )
         DatePickerDialog(
-            onDismissRequest = { showStartPicker = false },
+            onDismissRequest = { showStartDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
                     datePickerState.selectedDateMillis?.let {
@@ -736,23 +865,23 @@ fun DateRangeFilterDialog(
                             Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
                         )
                     }
-                    showStartPicker = false
+                    showStartDatePicker = false
                 }) { Text("OK") }
             },
             dismissButton = {
-                TextButton(onClick = { showStartPicker = false }) { Text("Cancel") }
+                TextButton(onClick = { showStartDatePicker = false }) { Text("Cancel") }
             }
         ) {
             DatePicker(state = datePickerState)
         }
     }
 
-    if (showEndPicker) {
+    if (showEndDatePicker) {
         val datePickerState = rememberDatePickerState(
             initialSelectedDateMillis = endDate?.atStartOfDay(ZoneId.systemDefault())?.toInstant()?.toEpochMilli()
         )
         DatePickerDialog(
-            onDismissRequest = { showEndPicker = false },
+            onDismissRequest = { showEndDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
                     datePickerState.selectedDateMillis?.let {
@@ -760,14 +889,87 @@ fun DateRangeFilterDialog(
                             Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate()
                         )
                     }
-                    showEndPicker = false
+                    showEndDatePicker = false
                 }) { Text("OK") }
             },
             dismissButton = {
-                TextButton(onClick = { showEndPicker = false }) { Text("Cancel") }
+                TextButton(onClick = { showEndDatePicker = false }) { Text("Cancel") }
             }
         ) {
             DatePicker(state = datePickerState)
+        }
+    }
+
+    // Time Pickers
+    if (showStartTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = startTime?.first ?: 0,
+            initialMinute = startTime?.second ?: 0,
+            is24Hour = true
+        )
+        TimePickerDialog(
+            onDismissRequest = { showStartTimePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    onStartTimeSelected(Pair(timePickerState.hour, timePickerState.minute))
+                    showStartTimePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStartTimePicker = false }) { Text("Cancel") }
+            }
+        ) {
+            TimePicker(state = timePickerState)
+        }
+    }
+
+    if (showEndTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = endTime?.first ?: 23,
+            initialMinute = endTime?.second ?: 59,
+            is24Hour = true
+        )
+        TimePickerDialog(
+            onDismissRequest = { showEndTimePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    onEndTimeSelected(Pair(timePickerState.hour, timePickerState.minute))
+                    showEndTimePicker = false
+                }) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEndTimePicker = false }) { Text("Cancel") }
+            }
+        ) {
+            TimePicker(state = timePickerState)
+        }
+    }
+}
+
+@Composable
+fun TimePickerDialog(
+    onDismissRequest: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    dismissButton: @Composable () -> Unit,
+    content: @Composable () -> Unit
+) {
+    Dialog(onDismissRequest = onDismissRequest) {
+        Card(shape = RoundedCornerShape(16.dp)) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                content()
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    dismissButton()
+                    Spacer(Modifier.width(8.dp))
+                    confirmButton()
+                }
+            }
         }
     }
 }
