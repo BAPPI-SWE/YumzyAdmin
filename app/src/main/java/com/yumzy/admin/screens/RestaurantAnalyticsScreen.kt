@@ -43,8 +43,7 @@ data class ItemOrderStats(
 data class MiniRestaurantOrder(
     val items: List<Map<String, Any>> = emptyList(),
     val orderStatus: String = "",
-    val createdAt: Timestamp = Timestamp.now(),
-    val miniResId: String? = null
+    val createdAt: Timestamp = Timestamp.now()
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,28 +89,17 @@ fun RestaurantAnalyticsScreen(
                 val snapshot = query.get().await()
                 val orders = snapshot.documents.mapNotNull { doc ->
                     try {
-                        val itemsData = doc.get("items") as? List<Map<String, Any>> ?: emptyList()
-                        val status = doc.getString("orderStatus") ?: ""
-                        val createdAt = doc.getTimestamp("createdAt") ?: Timestamp.now()
-
                         MiniRestaurantOrder(
-                            items = itemsData,
-                            orderStatus = status,
-                            createdAt = createdAt
+                            items = doc.get("items") as? List<Map<String, Any>> ?: emptyList(),
+                            orderStatus = doc.getString("orderStatus") ?: "",
+                            createdAt = doc.getTimestamp("createdAt") ?: Timestamp.now()
                         )
                     } catch (e: Exception) {
                         null
                     }
                 }
 
-                // Get all items from this mini restaurant
-                val restaurantItems = db.collection("store_items")
-                    .whereEqualTo("miniRes", miniResId)
-                    .get().await()
-                    .documents.map { it.getString("name") ?: "" }
-                    .toSet()
-
-                // Filter orders and apply time filter
+                // Filter orders by time and status
                 val filteredOrders = orders.filter { order ->
                     // Time filter
                     val timeMatch = if (startTime != null || endTime != null) {
@@ -142,8 +130,10 @@ fun RestaurantAnalyticsScreen(
                             ?: itemMap["name"] as? String
                             ?: "Unknown Item"
 
-                        // Only count if item belongs to this restaurant
-                        if (restaurantItems.contains(itemName)) {
+                        // --- FIX: Check the miniResName directly on the item ---
+                        // This is far more reliable than matching by name.
+                        val itemMiniResName = itemMap["miniResName"] as? String ?: ""
+                        if (itemMiniResName == miniResName) {
                             val quantity = (itemMap["quantity"] as? Number)?.toInt() ?: 0
 
                             if (!itemCountMap.containsKey(itemName)) {
@@ -196,7 +186,7 @@ fun RestaurantAnalyticsScreen(
     val totalPending = itemStats.sumOf { it.pendingCount }
     val totalAccepted = itemStats.sumOf { it.acceptedCount }
     val totalDelivered = itemStats.sumOf { it.deliveredCount }
-    val totalOrders = totalPending + totalAccepted + totalDelivered
+    val totalItemsSold = totalPending + totalAccepted + totalDelivered
 
     Scaffold(
         topBar = {
@@ -336,7 +326,7 @@ fun RestaurantAnalyticsScreen(
                     modifier = Modifier.padding(16.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    AnalyticsStatBadge("Total", totalOrders, Color.Gray)
+                    AnalyticsStatBadge("Total Items", totalItemsSold, Color.Gray)
                     AnalyticsStatBadge("Pending", totalPending, Color(0xFFFF9800))
                     AnalyticsStatBadge("Accepted", totalAccepted, Color(0xFF2196F3))
                     AnalyticsStatBadge("Delivered", totalDelivered, Color(0xFF4CAF50))
@@ -367,7 +357,7 @@ fun RestaurantAnalyticsScreen(
                         )
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            "No orders found",
+                            "No matching orders found",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )
@@ -381,7 +371,7 @@ fun RestaurantAnalyticsScreen(
                 ) {
                     item {
                         Text(
-                            "Items (${itemStats.size})",
+                            "Item Breakdown (${itemStats.size})",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold
                         )
