@@ -31,7 +31,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
-        // HIGHLIGHT: Add this line to enable support for modern features
         isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
@@ -60,11 +59,11 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
-
-    // ... other dependencies
+    // Firebase
     implementation(platform("com.google.firebase:firebase-bom:33.1.1"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-storage-ktx") // ADDED FOR IMAGE UPLOADS
     implementation("com.google.android.gms:play-services-auth:21.2.0")
 
     // Other dependencies for UI, Navigation, etc.
@@ -76,6 +75,5 @@ dependencies {
 
     implementation("androidx.compose.material:material-icons-extended:1.6.8")
 
-    // HIGHLIGHT: Add this line to include the library that provides the modern features
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }

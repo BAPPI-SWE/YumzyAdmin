@@ -1,17 +1,21 @@
 package com.yumzy.admin.screens
 
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +38,7 @@ import com.yumzy.admin.data.MainCategory
 import com.yumzy.admin.data.MiniRestaurant
 import com.yumzy.admin.data.StoreSubCategory
 import com.yumzy.admin.navigation.Screen
+import com.yumzy.admin.utils.ImageUploadHelper
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -161,24 +166,45 @@ fun StoreManagementScreen(navController: NavController) {
                 mainCategories = mainCategories,
                 allLocations = allSubLocations,
                 onDismiss = { showAddEditDialog = false },
-                onSave = { name, imageUrl, parentId, locations, openStatus ->
-                    val data = hashMapOf(
-                        "name" to name,
-                        "imageUrl" to imageUrl,
-                        "parentCategory" to parentId,
-                        "availableLocations" to locations,
-                        "open" to if (openStatus) "yes" else "no"
-                    )
-                    val task = if (restaurantToEdit == null) {
-                        Firebase.firestore.collection("mini_restaurants").add(data)
-                    } else {
-                        Firebase.firestore.collection("mini_restaurants").document(restaurantToEdit!!.id).set(data)
-                    }
-                    task.addOnSuccessListener {
-                        Toast.makeText(context, "Shop Saved!", Toast.LENGTH_SHORT).show()
-                        refreshData()
-                    }.addOnFailureListener {
-                        Toast.makeText(context, "Error saving shop.", Toast.LENGTH_SHORT).show()
+                onSave = { name: String, imageUri: Uri?, parentId: String, locations: List<String>, openStatus: Boolean ->
+                    coroutineScope.launch {
+                        try {
+                            // Show loading
+                            Toast.makeText(context, "Uploading image...", Toast.LENGTH_SHORT).show()
+
+                            // Upload image to Firebase Storage
+                            val imageUrl: String = if (imageUri != null) {
+                                if (restaurantToEdit != null) {
+                                    // Replace existing image
+                                    ImageUploadHelper.replaceImage(restaurantToEdit?.imageUrl, imageUri, "mini_restaurants")
+                                } else {
+                                    // Upload new image
+                                    ImageUploadHelper.uploadImage(imageUri, "mini_restaurants")
+                                }
+                            } else {
+                                restaurantToEdit?.imageUrl ?: ""
+                            }
+
+                            val data = hashMapOf(
+                                "name" to name,
+                                "imageUrl" to imageUrl,
+                                "parentCategory" to parentId,
+                                "availableLocations" to locations,
+                                "open" to if (openStatus) "yes" else "no"
+                            )
+
+                            val task = if (restaurantToEdit == null) {
+                                Firebase.firestore.collection("mini_restaurants").add(data)
+                            } else {
+                                Firebase.firestore.collection("mini_restaurants").document(restaurantToEdit!!.id).set(data)
+                            }
+
+                            task.await()
+                            Toast.makeText(context, "Shop Saved!", Toast.LENGTH_SHORT).show()
+                            refreshData()
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
                     }
                     showAddEditDialog = false
                 }
@@ -191,18 +217,33 @@ fun StoreManagementScreen(navController: NavController) {
                 mainCategories = mainCategories,
                 allLocations = allSubLocations,
                 onDismiss = { showAddCategoryDialog = false },
-                onSave = { name, imageUrl, parentId, locations ->
-                    val newCategory = hashMapOf(
-                        "name" to name,
-                        "imageUrl" to imageUrl,
-                        "parentCategory" to parentId,
-                        "availableLocations" to locations
-                    )
-                    Firebase.firestore.collection("store_sub_categories").add(newCategory)
-                        .addOnSuccessListener {
+                onSave = { name: String, imageUri: Uri?, parentId: String, locations: List<String> ->
+                    coroutineScope.launch {
+                        try {
+                            if (imageUri == null) {
+                                Toast.makeText(context, "Please select an image.", Toast.LENGTH_SHORT).show()
+                                return@launch
+                            }
+
+                            Toast.makeText(context, "Uploading image...", Toast.LENGTH_SHORT).show()
+
+                            // Upload image to Firebase Storage
+                            val imageUrl: String = ImageUploadHelper.uploadImage(imageUri, "subcategories")
+
+                            val newCategory = hashMapOf(
+                                "name" to name,
+                                "imageUrl" to imageUrl,
+                                "parentCategory" to parentId,
+                                "availableLocations" to locations
+                            )
+
+                            Firebase.firestore.collection("store_sub_categories").add(newCategory).await()
                             Toast.makeText(context, "Category Added", Toast.LENGTH_SHORT).show()
                             refreshData()
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                         }
+                    }
                     showAddCategoryDialog = false
                 }
             )
@@ -214,28 +255,48 @@ fun StoreManagementScreen(navController: NavController) {
                 allLocations = allSubLocations,
                 subCategory = category,
                 onDismiss = { categoryToEdit = null },
-                onSave = { name, imageUrl, parentId, locations ->
-                    val updatedCategory = mapOf(
-                        "name" to name,
-                        "imageUrl" to imageUrl,
-                        "parentCategory" to parentId,
-                        "availableLocations" to locations
-                    )
-                    Firebase.firestore.collection("store_sub_categories").document(category.id)
-                        .update(updatedCategory)
-                        .addOnSuccessListener {
+                onSave = { name: String, imageUri: Uri?, parentId: String, locations: List<String> ->
+                    coroutineScope.launch {
+                        try {
+                            Toast.makeText(context, "Uploading image...", Toast.LENGTH_SHORT).show()
+
+                            // Upload image to Firebase Storage (replace old one)
+                            val imageUrl: String = if (imageUri != null) {
+                                ImageUploadHelper.replaceImage(category.imageUrl ?: "", imageUri, "subcategories")
+                            } else {
+                                category.imageUrl ?: ""
+                            }
+
+                            val updatedCategory = mapOf(
+                                "name" to name,
+                                "imageUrl" to imageUrl,
+                                "parentCategory" to parentId,
+                                "availableLocations" to locations
+                            )
+
+                            Firebase.firestore.collection("store_sub_categories").document(category.id)
+                                .update(updatedCategory).await()
                             Toast.makeText(context, "Category Updated", Toast.LENGTH_SHORT).show()
                             refreshData()
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                         }
+                    }
                     categoryToEdit = null
                 },
                 onDelete = {
-                    Firebase.firestore.collection("store_sub_categories").document(category.id)
-                        .delete()
-                        .addOnSuccessListener {
+                    coroutineScope.launch {
+                        try {
+                            // Delete image from storage
+                            category.imageUrl?.let { ImageUploadHelper.deleteImage(it) }
+                            // Delete from Firestore
+                            Firebase.firestore.collection("store_sub_categories").document(category.id).delete().await()
                             Toast.makeText(context, "Category Deleted", Toast.LENGTH_SHORT).show()
                             refreshData()
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_SHORT).show()
                         }
+                    }
                     categoryToEdit = null
                 }
             )
@@ -273,11 +334,24 @@ fun CategoriesManagementContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = subCat.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f)
-                        )
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            AsyncImage(
+                                model = subCat.imageUrl,
+                                contentDescription = subCat.name,
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = subCat.name,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                        }
                         Text(
                             text = "${subCat.availableLocations.size} locations",
                             style = MaterialTheme.typography.bodySmall,
@@ -391,22 +465,88 @@ fun AddEditMiniRestaurantDialog(
     mainCategories: List<MainCategory>,
     allLocations: List<String>,
     onDismiss: () -> Unit,
-    onSave: (name: String, imageUrl: String, parentId: String, locations: List<String>, openStatus: Boolean) -> Unit
+    onSave: (String, Uri?, String, List<String>, Boolean) -> Unit
 ) {
     var name by remember { mutableStateOf(restaurant?.name ?: "") }
-    var imageUrl by remember { mutableStateOf(restaurant?.imageUrl ?: "") }
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var isOpen by remember { mutableStateOf(restaurant?.open?.equals("yes", true) ?: true) }
 
     var expanded by remember { mutableStateOf(false) }
     var selectedParent by remember { mutableStateOf(mainCategories.find { it.id == restaurant?.parentCategory }) }
     var selectedLocations by remember { mutableStateOf(restaurant?.availableLocations ?: emptyList()) }
 
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        selectedImageUri = uri
+    }
+
     Dialog(onDismissRequest = onDismiss) {
         Card(modifier = Modifier.padding(16.dp)) {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(if (restaurant == null) "Add Shop" else "Edit Shop", style = MaterialTheme.typography.titleLarge)
+
                 TextField(value = name, onValueChange = { name = it }, label = { Text("Shop Name") })
-                TextField(value = imageUrl, onValueChange = { imageUrl = it }, label = { Text("Image URL") })
+
+                // Image Picker Field
+                OutlinedCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clickable { imagePickerLauncher.launch("image/*") },
+                    colors = CardDefaults.outlinedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        when {
+                            selectedImageUri != null -> {
+                                AsyncImage(
+                                    model = selectedImageUri,
+                                    contentDescription = "Selected image",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                            restaurant?.imageUrl?.isNotBlank() == true -> {
+                                AsyncImage(
+                                    model = restaurant.imageUrl,
+                                    contentDescription = "Current image",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                            else -> {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        Icons.Default.AddPhotoAlternate,
+                                        contentDescription = "Select image",
+                                        modifier = Modifier.size(48.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("Tap to select image", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+
+                        // Show upload icon overlay
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(8.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Icon(
+                                Icons.Default.CloudUpload,
+                                contentDescription = "Upload",
+                                modifier = Modifier.padding(8.dp).size(24.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
 
                 ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
                     TextField(
@@ -414,7 +554,7 @@ fun AddEditMiniRestaurantDialog(
                         onValueChange = {},
                         readOnly = true,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                        modifier = Modifier.menuAnchor()
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable)
                     )
                     ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                         mainCategories.forEach { mainCat ->
@@ -442,10 +582,14 @@ fun AddEditMiniRestaurantDialog(
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                     Button(onClick = {
                         val parent = selectedParent
-                        if (name.isBlank() || imageUrl.isBlank() || parent == null || selectedLocations.isEmpty()) {
+                        if (name.isBlank() || parent == null || selectedLocations.isEmpty()) {
                             return@Button
                         }
-                        onSave(name, imageUrl, parent.id, selectedLocations, isOpen)
+                        // Only require image for new restaurants
+                        if (restaurant == null && selectedImageUri == null) {
+                            return@Button
+                        }
+                        onSave(name, selectedImageUri, parent.id, selectedLocations, isOpen)
                     }) { Text("Save") }
                 }
             }
@@ -460,21 +604,87 @@ fun EditCategoryDialog(
     allLocations: List<String>,
     subCategory: StoreSubCategory? = null,
     onDismiss: () -> Unit,
-    onSave: (name: String, imageUrl: String, parentId: String, locations: List<String>) -> Unit,
+    onSave: (String, Uri?, String, List<String>) -> Unit,
     onDelete: (() -> Unit)? = null
 ) {
     var name by remember { mutableStateOf(subCategory?.name ?: "") }
-    var imageUrl by remember { mutableStateOf(subCategory?.imageUrl ?: "") }
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var expanded by remember { mutableStateOf(false) }
     var selectedParent by remember { mutableStateOf(mainCategories.find { it.id == subCategory?.parentCategory }) }
     var selectedLocations by remember { mutableStateOf(subCategory?.availableLocations ?: emptyList()) }
 
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        selectedImageUri = uri
+    }
+
     Dialog(onDismissRequest = onDismiss) {
         Card {
-            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(if (subCategory == null) "Add Sub-Category" else "Edit Sub-Category", style = MaterialTheme.typography.titleLarge)
+
                 TextField(value = name, onValueChange = { name = it }, label = { Text("Sub-Category Name") })
-                TextField(value = imageUrl, onValueChange = { imageUrl = it }, label = { Text("Image URL") })
+
+                // Image Picker Field
+                OutlinedCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clickable { imagePickerLauncher.launch("image/*") },
+                    colors = CardDefaults.outlinedCardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        when {
+                            selectedImageUri != null -> {
+                                AsyncImage(
+                                    model = selectedImageUri,
+                                    contentDescription = "Selected image",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                            subCategory?.imageUrl?.isNotBlank() == true -> {
+                                AsyncImage(
+                                    model = subCategory.imageUrl,
+                                    contentDescription = "Current image",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+                            else -> {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        Icons.Default.AddPhotoAlternate,
+                                        contentDescription = "Select image",
+                                        modifier = Modifier.size(48.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("Tap to select image", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+
+                        // Show upload icon overlay
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(8.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Icon(
+                                Icons.Default.CloudUpload,
+                                contentDescription = "Upload",
+                                modifier = Modifier.padding(8.dp).size(24.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
 
                 ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
                     TextField(
@@ -482,7 +692,7 @@ fun EditCategoryDialog(
                         onValueChange = {},
                         readOnly = true,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                        modifier = Modifier.menuAnchor()
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable)
                     )
                     ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                         mainCategories.forEach { mainCat ->
@@ -518,10 +728,14 @@ fun EditCategoryDialog(
                     TextButton(onClick = onDismiss) { Text("Cancel") }
                     Button(onClick = {
                         val currentParent = selectedParent
-                        if(name.isBlank() || imageUrl.isBlank() || currentParent == null || selectedLocations.isEmpty()){
+                        if(name.isBlank() || currentParent == null || selectedLocations.isEmpty()){
                             return@Button
                         }
-                        onSave(name, imageUrl, currentParent.id, selectedLocations)
+                        // Only require image for new categories
+                        if (subCategory == null && selectedImageUri == null) {
+                            return@Button
+                        }
+                        onSave(name, selectedImageUri, currentParent.id, selectedLocations)
                     }) {
                         Text("Save")
                     }

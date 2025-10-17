@@ -1,6 +1,10 @@
 package com.yumzy.admin.screens
 
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,10 +15,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -28,6 +35,7 @@ import coil.compose.AsyncImage
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import com.yumzy.admin.data.StoreItem
+import com.yumzy.admin.utils.ImageUploadHelper
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -116,17 +124,37 @@ fun MiniRestaurantItemListScreen(
             AddEditStoreItemDialog(
                 item = itemToEdit,
                 onDismiss = { showDialog = false },
-                onSave = { itemData ->
-                    val task = if (itemToEdit == null) {
-                        Firebase.firestore.collection("store_items").add(itemData)
-                    } else {
-                        Firebase.firestore.collection("store_items").document(itemToEdit!!.id).set(itemData)
-                    }
-                    task.addOnSuccessListener {
-                        Toast.makeText(context, "Item Saved!", Toast.LENGTH_SHORT).show()
-                        refreshItems()
-                    }.addOnFailureListener {
-                        Toast.makeText(context, "Error saving item.", Toast.LENGTH_SHORT).show()
+                onSave = { itemData, imageUri ->
+                    coroutineScope.launch {
+                        try {
+                            Toast.makeText(context, "Uploading...", Toast.LENGTH_SHORT).show()
+
+                            // Upload image if provided
+                            val imageUrl = if (imageUri != null) {
+                                if (itemToEdit != null) {
+                                    ImageUploadHelper.replaceImage(itemToEdit?.imageUrl, imageUri, "store_items")
+                                } else {
+                                    ImageUploadHelper.uploadImage(imageUri, "store_items")
+                                }
+                            } else {
+                                itemToEdit?.imageUrl ?: ""
+                            }
+
+                            // Add image URL to item data
+                            itemData["imageUrl"] = imageUrl
+
+                            val task = if (itemToEdit == null) {
+                                Firebase.firestore.collection("store_items").add(itemData)
+                            } else {
+                                Firebase.firestore.collection("store_items").document(itemToEdit!!.id).set(itemData)
+                            }
+
+                            task.await()
+                            Toast.makeText(context, "Item Saved!", Toast.LENGTH_SHORT).show()
+                            refreshItems()
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+                        }
                     }
                     showDialog = false
                 },
@@ -188,14 +216,14 @@ fun AdminStoreItemCard(
 fun AddEditStoreItemDialog(
     item: StoreItem?,
     onDismiss: () -> Unit,
-    onSave: (HashMap<String, Any>) -> Unit,
+    onSave: (HashMap<String, Any>, Uri?) -> Unit,
     fixedMiniResId: String,
     fixedSubCategory: String
 ) {
     var name by remember { mutableStateOf(item?.name ?: "") }
     var price by remember { mutableStateOf(item?.price?.toString() ?: "") }
     var description by remember { mutableStateOf(item?.itemDescription ?: "") }
-    var imageUrl by remember { mutableStateOf(item?.imageUrl ?: "") }
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var deliveryCharge by remember { mutableStateOf(item?.additionalDeliveryCharge?.toString() ?: "0") }
     var serviceCharge by remember { mutableStateOf(item?.additionalServiceCharge?.toString() ?: "0") }
 
@@ -205,10 +233,15 @@ fun AddEditStoreItemDialog(
     var variantNames by remember { mutableStateOf(listOf("", "")) }
     var variantPrices by remember { mutableStateOf(listOf("", "")) }
 
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        selectedImageUri = uri
+    }
+
     // Load existing multi-variant data if editing
     LaunchedEffect(item) {
         if (item != null) {
-            // Try to fetch multi-variant data from Firestore
             try {
                 val doc = Firebase.firestore.collection("store_items").document(item.id).get().await()
                 val multiVariantValue = doc.getLong("multiVariant")?.toInt() ?: 0
@@ -248,6 +281,66 @@ fun AddEditStoreItemDialog(
                     Text(if (item == null) "Add Item" else "Edit Item", style = MaterialTheme.typography.titleLarge)
 
                     TextField(value = name, onValueChange = { name = it }, label = { Text("Item Name") })
+
+                    // Image Picker Field
+                    OutlinedCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clickable { imagePickerLauncher.launch("image/*") },
+                        colors = CardDefaults.outlinedCardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        )
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            when {
+                                selectedImageUri != null -> {
+                                    AsyncImage(
+                                        model = selectedImageUri,
+                                        contentDescription = "Selected image",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                                item?.imageUrl?.isNotBlank() == true -> {
+                                    AsyncImage(
+                                        model = item.imageUrl,
+                                        contentDescription = "Current image",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
+                                else -> {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            Icons.Default.AddPhotoAlternate,
+                                            contentDescription = "Select image",
+                                            modifier = Modifier.size(48.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text("Tap to select image", style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+                            }
+
+                            // Show upload icon overlay
+                            Surface(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(8.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Icon(
+                                    Icons.Default.CloudUpload,
+                                    contentDescription = "Upload",
+                                    modifier = Modifier.padding(8.dp).size(20.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
 
                     // Multi-Variant Checkbox
                     Row(
@@ -362,7 +455,6 @@ fun AddEditStoreItemDialog(
                     }
 
                     TextField(value = description, onValueChange = { description = it }, label = { Text("Description (Optional)") }, maxLines = 3)
-                    TextField(value = imageUrl, onValueChange = { imageUrl = it }, label = { Text("Image URL (Optional)") })
                     TextField(
                         value = deliveryCharge,
                         onValueChange = { deliveryCharge = it },
@@ -387,10 +479,15 @@ fun AddEditStoreItemDialog(
                                 return@Button
                             }
 
+                            // Only require image for new items
+                            if (item == null && selectedImageUri == null) {
+                                Toast.makeText(context, "Please select an image.", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+
                             val newItemData = hashMapOf<String, Any>(
                                 "name" to name,
                                 "itemDescription" to description,
-                                "imageUrl" to imageUrl,
                                 "additionalDeliveryCharge" to deliveryDouble,
                                 "additionalServiceCharge" to serviceDouble,
                                 "miniRes" to fixedMiniResId,
@@ -437,7 +534,7 @@ fun AddEditStoreItemDialog(
                                 newItemData["multiVariant"] = 0
                             }
 
-                            onSave(newItemData)
+                            onSave(newItemData, selectedImageUri)
                         }) { Text("Save") }
                     }
                 }
