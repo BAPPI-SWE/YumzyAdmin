@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -70,6 +71,23 @@ fun MiniRestaurantItemListScreen(
         }
     }
 
+    fun deleteItem(item: StoreItem) {
+        coroutineScope.launch {
+            try {
+                // Delete image from storage
+                if (item.imageUrl.isNotBlank()) {
+                    ImageUploadHelper.deleteImage(item.imageUrl)
+                }
+                // Delete from Firestore
+                Firebase.firestore.collection("store_items").document(item.id).delete().await()
+                Toast.makeText(context, "Item deleted successfully", Toast.LENGTH_SHORT).show()
+                refreshItems()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error deleting item: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         refreshItems()
     }
@@ -108,6 +126,9 @@ fun MiniRestaurantItemListScreen(
                         onEditClick = {
                             itemToEdit = item
                             showDialog = true
+                        },
+                        onDeleteClick = {
+                            deleteItem(item)
                         },
                         onStockChange = { newStockStatus ->
                             val stockValue = if (newStockStatus) "yes" else "no"
@@ -158,6 +179,10 @@ fun MiniRestaurantItemListScreen(
                     }
                     showDialog = false
                 },
+                onDelete = { item ->
+                    deleteItem(item)
+                    showDialog = false
+                },
                 fixedMiniResId = miniResId,
                 fixedSubCategory = subCategoryName
             )
@@ -169,6 +194,7 @@ fun MiniRestaurantItemListScreen(
 fun AdminStoreItemCard(
     item: StoreItem,
     onEditClick: () -> Unit,
+    onDeleteClick: () -> Unit,
     onStockChange: (Boolean) -> Unit
 ) {
     Card(
@@ -195,7 +221,20 @@ fun AdminStoreItemCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    TextButton(onClick = onEditClick) { Text("EDIT") }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = onEditClick) { Text("EDIT") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        IconButton(
+                            onClick = onDeleteClick,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "Delete",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(if(item.stock == "yes") "In Stock" else "Out", fontSize = 12.sp)
                         Spacer(Modifier.width(4.dp))
@@ -217,6 +256,7 @@ fun AddEditStoreItemDialog(
     item: StoreItem?,
     onDismiss: () -> Unit,
     onSave: (HashMap<String, Any>, Uri?) -> Unit,
+    onDelete: ((StoreItem) -> Unit)? = null,
     fixedMiniResId: String,
     fixedSubCategory: String
 ) {
@@ -468,74 +508,110 @@ fun AddEditStoreItemDialog(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
 
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        TextButton(onClick = onDismiss) { Text("Cancel") }
-                        Button(onClick = {
-                            val deliveryDouble = deliveryCharge.toDoubleOrNull() ?: 0.0
-                            val serviceDouble = serviceCharge.toDoubleOrNull() ?: 0.0
-
-                            if (name.isBlank()) {
-                                Toast.makeText(context, "Item name is required.", Toast.LENGTH_SHORT).show()
-                                return@Button
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        if (item != null && onDelete != null) {
+                            var showDeleteConfirm by remember { mutableStateOf(false) }
+                            TextButton(
+                                onClick = { showDeleteConfirm = true },
+                                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Text("Delete Item")
                             }
-
-                            // Only require image for new items
-                            if (item == null && selectedImageUri == null) {
-                                Toast.makeText(context, "Please select an image.", Toast.LENGTH_SHORT).show()
-                                return@Button
+                            if (showDeleteConfirm) {
+                                AlertDialog(
+                                    onDismissRequest = { showDeleteConfirm = false },
+                                    title = { Text("Delete Item?") },
+                                    text = { Text("Are you sure you want to delete '${item.name}'?") },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = {
+                                                onDelete(item)
+                                                showDeleteConfirm = false
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                        ) {
+                                            Text("Delete")
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showDeleteConfirm = false }) {
+                                            Text("Cancel")
+                                        }
+                                    }
+                                )
                             }
+                        } else {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                        Row {
+                            TextButton(onClick = onDismiss) { Text("Cancel") }
+                            Button(onClick = {
+                                val deliveryDouble = deliveryCharge.toDoubleOrNull() ?: 0.0
+                                val serviceDouble = serviceCharge.toDoubleOrNull() ?: 0.0
 
-                            val newItemData = hashMapOf<String, Any>(
-                                "name" to name,
-                                "itemDescription" to description,
-                                "additionalDeliveryCharge" to deliveryDouble,
-                                "additionalServiceCharge" to serviceDouble,
-                                "miniRes" to fixedMiniResId,
-                                "subCategory" to fixedSubCategory,
-                                "stock" to (item?.stock ?: "yes")
-                            )
-
-                            if (hasMultiVariant) {
-                                val count = variantCount.toIntOrNull() ?: 2
-                                if (count < 2) {
-                                    Toast.makeText(context, "Multi-variant must have at least 2 variants.", Toast.LENGTH_SHORT).show()
+                                if (name.isBlank()) {
+                                    Toast.makeText(context, "Item name is required.", Toast.LENGTH_SHORT).show()
                                     return@Button
                                 }
 
-                                // Validate all variants have name and price
-                                for (i in 0 until count) {
-                                    if (variantNames.getOrNull(i).isNullOrBlank() || variantPrices.getOrNull(i).isNullOrBlank()) {
-                                        Toast.makeText(context, "All variants must have name and price.", Toast.LENGTH_SHORT).show()
-                                        return@Button
-                                    }
-                                }
-
-                                newItemData["multiVariant"] = count
-                                newItemData["price"] = 0.0 // Placeholder, not used for multi-variant
-
-                                // Add variant fields
-                                for (i in 0 until count) {
-                                    val variantPrice = variantPrices[i].toDoubleOrNull()
-                                    if (variantPrice == null) {
-                                        Toast.makeText(context, "Invalid price for variant ${i + 1}.", Toast.LENGTH_SHORT).show()
-                                        return@Button
-                                    }
-                                    newItemData["variant${i + 1}name"] = variantNames[i]
-                                    newItemData["variant${i + 1}price"] = variantPrice
-                                }
-                            } else {
-                                // Regular item
-                                val priceDouble = price.toDoubleOrNull()
-                                if (priceDouble == null) {
-                                    Toast.makeText(context, "Valid price is required.", Toast.LENGTH_SHORT).show()
+                                // Only require image for new items
+                                if (item == null && selectedImageUri == null) {
+                                    Toast.makeText(context, "Please select an image.", Toast.LENGTH_SHORT).show()
                                     return@Button
                                 }
-                                newItemData["price"] = priceDouble
-                                newItemData["multiVariant"] = 0
-                            }
 
-                            onSave(newItemData, selectedImageUri)
-                        }) { Text("Save") }
+                                val newItemData = hashMapOf<String, Any>(
+                                    "name" to name,
+                                    "itemDescription" to description,
+                                    "additionalDeliveryCharge" to deliveryDouble,
+                                    "additionalServiceCharge" to serviceDouble,
+                                    "miniRes" to fixedMiniResId,
+                                    "subCategory" to fixedSubCategory,
+                                    "stock" to (item?.stock ?: "yes")
+                                )
+
+                                if (hasMultiVariant) {
+                                    val count = variantCount.toIntOrNull() ?: 2
+                                    if (count < 2) {
+                                        Toast.makeText(context, "Multi-variant must have at least 2 variants.", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+
+                                    // Validate all variants have name and price
+                                    for (i in 0 until count) {
+                                        if (variantNames.getOrNull(i).isNullOrBlank() || variantPrices.getOrNull(i).isNullOrBlank()) {
+                                            Toast.makeText(context, "All variants must have name and price.", Toast.LENGTH_SHORT).show()
+                                            return@Button
+                                        }
+                                    }
+
+                                    newItemData["multiVariant"] = count
+                                    newItemData["price"] = 0.0 // Placeholder, not used for multi-variant
+
+                                    // Add variant fields
+                                    for (i in 0 until count) {
+                                        val variantPrice = variantPrices[i].toDoubleOrNull()
+                                        if (variantPrice == null) {
+                                            Toast.makeText(context, "Invalid price for variant ${i + 1}.", Toast.LENGTH_SHORT).show()
+                                            return@Button
+                                        }
+                                        newItemData["variant${i + 1}name"] = variantNames[i]
+                                        newItemData["variant${i + 1}price"] = variantPrice
+                                    }
+                                } else {
+                                    // Regular item
+                                    val priceDouble = price.toDoubleOrNull()
+                                    if (priceDouble == null) {
+                                        Toast.makeText(context, "Valid price is required.", Toast.LENGTH_SHORT).show()
+                                        return@Button
+                                    }
+                                    newItemData["price"] = priceDouble
+                                    newItemData["multiVariant"] = 0
+                                }
+
+                                onSave(newItemData, selectedImageUri)
+                            }) { Text("Save") }
+                        }
                     }
                 }
             }

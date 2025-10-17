@@ -66,6 +66,10 @@ fun StoreManagementScreen(navController: NavController) {
     var showAddCategoryDialog by remember { mutableStateOf(false) }
     var categoryToEdit by remember { mutableStateOf<StoreSubCategory?>(null) }
 
+    // For delete confirmation
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var itemToDelete by remember { mutableStateOf<Any?>(null) }
+    var deleteType by remember { mutableStateOf("") } // "shop" or "category"
 
     fun refreshData() {
         isLoading = true
@@ -90,6 +94,38 @@ fun StoreManagementScreen(navController: NavController) {
                 Toast.makeText(context, "Error fetching data: ${e.message}", Toast.LENGTH_LONG).show()
             } finally {
                 isLoading = false
+            }
+        }
+    }
+
+    fun deleteShop(restaurant: MiniRestaurant) {
+        coroutineScope.launch {
+            try {
+                // Delete image from storage
+                if (restaurant.imageUrl.isNotBlank()) {
+                    ImageUploadHelper.deleteImage(restaurant.imageUrl)
+                }
+
+                // Delete from Firestore
+                Firebase.firestore.collection("mini_restaurants").document(restaurant.id).delete().await()
+
+                // Also delete all items associated with this shop
+                val itemsSnapshot = Firebase.firestore.collection("store_items")
+                    .whereEqualTo("miniRes", restaurant.id)
+                    .get().await()
+
+                for (doc in itemsSnapshot.documents) {
+                    val itemImageUrl = doc.getString("imageUrl")
+                    if (!itemImageUrl.isNullOrBlank()) {
+                        ImageUploadHelper.deleteImage(itemImageUrl)
+                    }
+                    doc.reference.delete().await()
+                }
+
+                Toast.makeText(context, "Shop deleted successfully", Toast.LENGTH_SHORT).show()
+                refreshData()
+            } catch (e: Exception) {
+                Toast.makeText(context, "Error deleting shop: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -137,7 +173,12 @@ fun StoreManagementScreen(navController: NavController) {
                 when (selectedTabIndex) {
                     0 -> CategoriesManagementContent(
                         groupedCategories = groupedCategories,
-                        onCategoryClick = { categoryToEdit = it }
+                        onCategoryClick = { categoryToEdit = it },
+                        onDeleteClick = { category ->
+                            itemToDelete = category
+                            deleteType = "category"
+                            showDeleteConfirm = true
+                        }
                     )
                     1 -> ShopsContent(
                         miniRestaurants = miniRestaurants,
@@ -148,6 +189,11 @@ fun StoreManagementScreen(navController: NavController) {
                             restaurantToEdit = miniRes
                             showAddEditDialog = true
                         },
+                        onDeleteClick = { miniRes ->
+                            itemToDelete = miniRes
+                            deleteType = "shop"
+                            showDeleteConfirm = true
+                        },
                         onStatusChange = { miniRes, isOpen ->
                             val newStatus = if (isOpen) "yes" else "no"
                             Firebase.firestore.collection("mini_restaurants").document(miniRes.id)
@@ -157,6 +203,51 @@ fun StoreManagementScreen(navController: NavController) {
                     )
                 }
             }
+        }
+
+        // Delete Confirmation Dialog
+        if (showDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                title = { Text("Confirm Delete") },
+                text = {
+                    when (deleteType) {
+                        "shop" -> {
+                            val shop = itemToDelete as? MiniRestaurant
+                            Text("Are you sure you want to delete '${shop?.name}'? This will also delete all items in this shop.")
+                        }
+                        "category" -> {
+                            val category = itemToDelete as? StoreSubCategory
+                            Text("Are you sure you want to delete '${category?.name}' category?")
+                        }
+                        else -> Text("Are you sure you want to delete this item?")
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            when (deleteType) {
+                                "shop" -> deleteShop(itemToDelete as MiniRestaurant)
+                                "category" -> {
+                                    // Category deletion is handled in EditCategoryDialog
+                                }
+                            }
+                            showDeleteConfirm = false
+                            itemToDelete = null
+                        }
+                    ) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showDeleteConfirm = false
+                        itemToDelete = null
+                    }) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
 
         // Shop Add/Edit Dialog
@@ -206,6 +297,10 @@ fun StoreManagementScreen(navController: NavController) {
                             Toast.makeText(context, "Error: ${e.message}", Toast.LENGTH_LONG).show()
                         }
                     }
+                    showAddEditDialog = false
+                },
+                onDelete = { restaurant ->
+                    deleteShop(restaurant)
                     showAddEditDialog = false
                 }
             )
@@ -307,7 +402,8 @@ fun StoreManagementScreen(navController: NavController) {
 @Composable
 fun CategoriesManagementContent(
     groupedCategories: List<GroupedCategory>,
-    onCategoryClick: (StoreSubCategory) -> Unit
+    onCategoryClick: (StoreSubCategory) -> Unit,
+    onDeleteClick: (StoreSubCategory) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -325,7 +421,6 @@ fun CategoriesManagementContent(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onCategoryClick(subCat) }
                 ) {
                     Row(
                         modifier = Modifier
@@ -335,7 +430,9 @@ fun CategoriesManagementContent(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onCategoryClick(subCat) },
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             AsyncImage(
@@ -352,11 +449,24 @@ fun CategoriesManagementContent(
                                 style = MaterialTheme.typography.titleMedium
                             )
                         }
-                        Text(
-                            text = "${subCat.availableLocations.size} locations",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "${subCat.availableLocations.size} locations",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(end = 12.dp)
+                            )
+                            IconButton(
+                                onClick = { onDeleteClick(subCat) },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
@@ -370,6 +480,7 @@ fun ShopsContent(
     miniRestaurants: List<MiniRestaurant>,
     onCardClick: (MiniRestaurant) -> Unit,
     onEditClick: (MiniRestaurant) -> Unit,
+    onDeleteClick: (MiniRestaurant) -> Unit,
     onStatusChange: (MiniRestaurant, Boolean) -> Unit
 ) {
     LazyColumn(
@@ -382,7 +493,8 @@ fun ShopsContent(
                 restaurant = restaurant,
                 onClick = { onCardClick(restaurant) },
                 onStatusChange = { isOpen -> onStatusChange(restaurant, isOpen) },
-                onEditClick = { onEditClick(restaurant) }
+                onEditClick = { onEditClick(restaurant) },
+                onDeleteClick = { onDeleteClick(restaurant) }
             )
         }
     }
@@ -394,7 +506,8 @@ fun MiniRestaurantAdminCard(
     restaurant: MiniRestaurant,
     onClick: () -> Unit,
     onStatusChange: (Boolean) -> Unit,
-    onEditClick: () -> Unit
+    onEditClick: () -> Unit,
+    onDeleteClick: () -> Unit
 ) {
     val isClosed = restaurant.open.equals("no", ignoreCase = true)
     Card(
@@ -430,8 +543,21 @@ fun MiniRestaurantAdminCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onEditClick) {
-                        Text("EDIT", color = Color.White, fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = onEditClick) {
+                            Text("EDIT", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        IconButton(
+                            onClick = onDeleteClick,
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "Delete",
+                                tint = Color.White
+                            )
+                        }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(if (isClosed) "Closed" else "Open", color = Color.White, fontWeight = FontWeight.SemiBold)
@@ -465,7 +591,8 @@ fun AddEditMiniRestaurantDialog(
     mainCategories: List<MainCategory>,
     allLocations: List<String>,
     onDismiss: () -> Unit,
-    onSave: (String, Uri?, String, List<String>, Boolean) -> Unit
+    onSave: (String, Uri?, String, List<String>, Boolean) -> Unit,
+    onDelete: ((MiniRestaurant) -> Unit)? = null
 ) {
     var name by remember { mutableStateOf(restaurant?.name ?: "") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -578,19 +705,55 @@ fun AddEditMiniRestaurantDialog(
                     Switch(checked = isOpen, onCheckedChange = { isOpen = it })
                 }
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Cancel") }
-                    Button(onClick = {
-                        val parent = selectedParent
-                        if (name.isBlank() || parent == null || selectedLocations.isEmpty()) {
-                            return@Button
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    if (restaurant != null && onDelete != null) {
+                        var showDeleteConfirm by remember { mutableStateOf(false) }
+                        TextButton(
+                            onClick = { showDeleteConfirm = true },
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Delete Shop")
                         }
-                        // Only require image for new restaurants
-                        if (restaurant == null && selectedImageUri == null) {
-                            return@Button
+                        if (showDeleteConfirm) {
+                            AlertDialog(
+                                onDismissRequest = { showDeleteConfirm = false },
+                                title = { Text("Delete Shop?") },
+                                text = { Text("Are you sure you want to delete '${restaurant.name}'? This will also delete all items in this shop.") },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            onDelete(restaurant)
+                                            showDeleteConfirm = false
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                    ) {
+                                        Text("Delete")
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showDeleteConfirm = false }) {
+                                        Text("Cancel")
+                                    }
+                                }
+                            )
                         }
-                        onSave(name, selectedImageUri, parent.id, selectedLocations, isOpen)
-                    }) { Text("Save") }
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                    Row {
+                        TextButton(onClick = onDismiss) { Text("Cancel") }
+                        Button(onClick = {
+                            val parent = selectedParent
+                            if (name.isBlank() || parent == null || selectedLocations.isEmpty()) {
+                                return@Button
+                            }
+                            // Only require image for new restaurants
+                            if (restaurant == null && selectedImageUri == null) {
+                                return@Button
+                            }
+                            onSave(name, selectedImageUri, parent.id, selectedLocations, isOpen)
+                        }) { Text("Save") }
+                    }
                 }
             }
         }
@@ -719,7 +882,14 @@ fun EditCategoryDialog(
                                 onDismissRequest = { showDeleteConfirm = false },
                                 title = { Text("Delete Category?") },
                                 text = { Text("Are you sure you want to delete '${subCategory?.name}'? This cannot be undone.")},
-                                confirmButton = { Button(onClick = { onDelete(); showDeleteConfirm = false }) { Text("Delete") } },
+                                confirmButton = {
+                                    Button(
+                                        onClick = { onDelete(); showDeleteConfirm = false },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                    ) {
+                                        Text("Delete")
+                                    }
+                                },
                                 dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }}
                             )
                         }
