@@ -76,4 +76,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended:1.6.8")
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    implementation("androidx.compose.material3:material3:1.2.1")
+    implementation("androidx.compose.material3:material3-window-size-class:1.2.1")
 }

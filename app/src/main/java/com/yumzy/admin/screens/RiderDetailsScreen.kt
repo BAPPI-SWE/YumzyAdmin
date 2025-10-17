@@ -49,19 +49,27 @@ fun RiderDetailsScreen(
     riderId: String,
     riderName: String,
     dateMillis: Long,
+    startTimeMillis: Long = -1L,  // -1 means no time filter
+    endTimeMillis: Long = -1L,    // -1 means no time filter
     navController: NavController
 ) {
     var orders by remember { mutableStateOf<List<RiderOrderDetail>>(emptyList()) }
-    var dailyTotals by remember { mutableStateOf(DailyTotals()) } // State for all our totals
+    var dailyTotals by remember { mutableStateOf(DailyTotals()) }
     var isLoading by remember { mutableStateOf(true) }
     val selectedDate = Instant.ofEpochMilli(dateMillis).atZone(ZoneId.systemDefault()).toLocalDate()
 
     LaunchedEffect(key1 = Unit) {
         val zoneId = ZoneId.systemDefault()
+
+        // Use time filters if provided, otherwise use full day
         val startOfDay = selectedDate.atStartOfDay(zoneId).toInstant().toEpochMilli()
         val endOfDay = selectedDate.plusDays(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
-        val startTimestamp = Timestamp(startOfDay / 1000, 0)
-        val endTimestamp = Timestamp(endOfDay / 1000, 0)
+
+        val actualStartMillis = if (startTimeMillis > 0) startTimeMillis else startOfDay
+        val actualEndMillis = if (endTimeMillis > 0) endTimeMillis else endOfDay
+
+        val startTimestamp = Timestamp(actualStartMillis / 1000, 0)
+        val endTimestamp = Timestamp(actualEndMillis / 1000, 0)
 
         val acceptedOrders = Firebase.firestore.collection("orders")
             .whereEqualTo("riderId", riderId)
@@ -89,13 +97,12 @@ fun RiderDetailsScreen(
 
         orders = acceptedOrders
 
-        // --- NEW CALCULATION LOGIC ---
+        // --- CALCULATION LOGIC ---
         val itemsCount = acceptedOrders.sumOf { order ->
             order.items.sumOf { item -> (item["quantity"] as? Long)?.toInt() ?: 0 }
         }
         val deliveryChargeSum = acceptedOrders.sumOf { it.deliveryCharge }
         val serviceChargeSum = acceptedOrders.sumOf { it.serviceCharge }
-        // Goods value is the total price minus the charges
         val goodsValueSum = acceptedOrders.sumOf { it.totalPrice - it.deliveryCharge - it.serviceCharge }
 
         dailyTotals = DailyTotals(
@@ -111,7 +118,26 @@ fun RiderDetailsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(riderName) },
+                title = {
+                    Column {
+                        Text(riderName)
+                        // Show time filter info if applied
+                        if (startTimeMillis > 0 || endTimeMillis > 0) {
+                            val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+                            val startText = if (startTimeMillis > 0) {
+                                Instant.ofEpochMilli(startTimeMillis).atZone(ZoneId.systemDefault()).toLocalTime().format(timeFormatter)
+                            } else "00:00"
+                            val endText = if (endTimeMillis > 0) {
+                                Instant.ofEpochMilli(endTimeMillis).atZone(ZoneId.systemDefault()).toLocalTime().format(timeFormatter)
+                            } else "23:59"
+                            Text(
+                                "Time: $startText - $endText",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = { navController.navigateUp() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -121,7 +147,9 @@ fun RiderDetailsScreen(
         }
     ) { paddingValues ->
         if (isLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
         } else {
             LazyColumn(
                 modifier = Modifier.padding(paddingValues),
@@ -132,7 +160,6 @@ fun RiderDetailsScreen(
                     val formatter = DateTimeFormatter.ofPattern("dd MMMM, yyyy")
                     Text("Accepted Orders on ${selectedDate.format(formatter)}", style = MaterialTheme.typography.titleLarge)
                     Spacer(modifier = Modifier.height(8.dp))
-                    // Pass all the new totals to the redesigned summary card
                     SummaryCard(totals = dailyTotals)
                     Spacer(modifier = Modifier.height(16.dp))
                     if(orders.isNotEmpty()){
@@ -185,7 +212,6 @@ fun SummaryRow(label: String, value: String) {
         Text(value, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
     }
 }
-
 
 @Composable
 fun OrderDetailCard(order: RiderOrderDetail) {
