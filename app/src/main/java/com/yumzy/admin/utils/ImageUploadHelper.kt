@@ -20,9 +20,9 @@ object ImageUploadHelper {
     private val storage = Firebase.storage
 
     // Image quality and size configurations
-    private const val COMPRESSION_QUALITY = 70
+    private const val COMPRESSION_QUALITY = 80
     private const val MAX_SUBCATEGORY_SIZE = 150 // 400x400 for small circle images
-    private const val MAX_STORE_ITEM_SIZE = 300 // 800x800 for product images
+    private const val MAX_STORE_ITEM_SIZE = 600 // 800x800 for product images
     private const val MAX_RESTAURANT_SIZE = 400 // 1000x1000 for restaurant banners
 
     /**
