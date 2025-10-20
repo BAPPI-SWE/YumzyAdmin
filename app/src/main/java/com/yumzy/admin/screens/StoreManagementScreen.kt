@@ -39,6 +39,7 @@ import com.yumzy.admin.data.MiniRestaurant
 import com.yumzy.admin.data.StoreSubCategory
 import com.yumzy.admin.navigation.Screen
 import com.yumzy.admin.utils.ImageUploadHelper
+import com.yumzy.admin.utils.ImageUploadHelper.ImageType
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -263,14 +264,25 @@ fun StoreManagementScreen(navController: NavController) {
                             // Show loading
                             Toast.makeText(context, "Uploading image...", Toast.LENGTH_SHORT).show()
 
-                            // Upload image to Firebase Storage
+                            // Upload image to Firebase Storage with resizing
                             val imageUrl: String = if (imageUri != null) {
                                 if (restaurantToEdit != null) {
                                     // Replace existing image
-                                    ImageUploadHelper.replaceImage(restaurantToEdit?.imageUrl, imageUri, "mini_restaurants")
+                                    ImageUploadHelper.replaceImage(
+                                        context = context,
+                                        oldImageUrl = restaurantToEdit?.imageUrl,
+                                        newImageUri = imageUri,
+                                        folder = "mini_restaurants",
+                                        imageType = ImageType.RESTAURANT
+                                    )
                                 } else {
                                     // Upload new image
-                                    ImageUploadHelper.uploadImage(imageUri, "mini_restaurants")
+                                    ImageUploadHelper.uploadImage(
+                                        context = context,
+                                        uri = imageUri,
+                                        folder = "mini_restaurants",
+                                        imageType = ImageType.RESTAURANT
+                                    )
                                 }
                             } else {
                                 restaurantToEdit?.imageUrl ?: ""
@@ -322,8 +334,13 @@ fun StoreManagementScreen(navController: NavController) {
 
                             Toast.makeText(context, "Uploading image...", Toast.LENGTH_SHORT).show()
 
-                            // Upload image to Firebase Storage
-                            val imageUrl: String = ImageUploadHelper.uploadImage(imageUri, "subcategories")
+                            // Upload image to Firebase Storage with resizing
+                            val imageUrl: String = ImageUploadHelper.uploadImage(
+                                context = context,
+                                uri = imageUri,
+                                folder = "subcategories",
+                                imageType = ImageType.SUBCATEGORY
+                            )
 
                             val newCategory = hashMapOf(
                                 "name" to name,
@@ -355,9 +372,15 @@ fun StoreManagementScreen(navController: NavController) {
                         try {
                             Toast.makeText(context, "Uploading image...", Toast.LENGTH_SHORT).show()
 
-                            // Upload image to Firebase Storage (replace old one)
+                            // Upload image to Firebase Storage (replace old one) with resizing
                             val imageUrl: String = if (imageUri != null) {
-                                ImageUploadHelper.replaceImage(category.imageUrl ?: "", imageUri, "subcategories")
+                                ImageUploadHelper.replaceImage(
+                                    context = context,
+                                    oldImageUrl = category.imageUrl ?: "",
+                                    newImageUri = imageUri,
+                                    folder = "subcategories",
+                                    imageType = ImageType.SUBCATEGORY
+                                )
                             } else {
                                 category.imageUrl ?: ""
                             }

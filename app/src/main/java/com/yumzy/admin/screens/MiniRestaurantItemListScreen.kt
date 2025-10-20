@@ -37,6 +37,7 @@ import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import com.yumzy.admin.data.StoreItem
 import com.yumzy.admin.utils.ImageUploadHelper
+import com.yumzy.admin.utils.ImageUploadHelper.ImageType
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -150,12 +151,23 @@ fun MiniRestaurantItemListScreen(
                         try {
                             Toast.makeText(context, "Uploading...", Toast.LENGTH_SHORT).show()
 
-                            // Upload image if provided
+                            // Upload image if provided with resizing
                             val imageUrl = if (imageUri != null) {
                                 if (itemToEdit != null) {
-                                    ImageUploadHelper.replaceImage(itemToEdit?.imageUrl, imageUri, "store_items")
+                                    ImageUploadHelper.replaceImage(
+                                        context = context,
+                                        oldImageUrl = itemToEdit?.imageUrl,
+                                        newImageUri = imageUri,
+                                        folder = "store_items",
+                                        imageType = ImageType.STORE_ITEM
+                                    )
                                 } else {
-                                    ImageUploadHelper.uploadImage(imageUri, "store_items")
+                                    ImageUploadHelper.uploadImage(
+                                        context = context,
+                                        uri = imageUri,
+                                        folder = "store_items",
+                                        imageType = ImageType.STORE_ITEM
+                                    )
                                 }
                             } else {
                                 itemToEdit?.imageUrl ?: ""
